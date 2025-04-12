@@ -200,6 +200,25 @@ QPushButton:pressed {
     background-color: #2573a7;
 }
 
+/* 资源管理器按钮样式 */
+QPushButton#explorer_btn {
+    background-color: #f0f0f0;
+    color: #333333;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 4px 8px;
+    min-width: 60px;
+    font-size: 11px;
+}
+
+QPushButton#explorer_btn:hover {
+    background-color: #e0e0e0;
+}
+
+QPushButton#explorer_btn:pressed {
+    background-color: #d0d0d0;
+}
+
 QPushButton:disabled {
     background-color: #cccccc;
     color: #888888;
@@ -236,6 +255,58 @@ QToolTip {
     border-radius: 4px;
     padding: 5px;
     opacity: 200;
+}
+
+/* 文件浏览器样式 */
+QTreeView {
+    background-color: #ffffff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 5px;
+    outline: none;
+}
+
+QTreeView::item {
+    padding: 4px;
+    border-radius: 4px;
+    margin: 1px 0px;
+}
+
+QTreeView::item:hover {
+    background-color: #f0f8ff;
+}
+
+QTreeView::item:selected {
+    background-color: #3498db;
+    color: white;
+}
+
+QTreeView::branch {
+    background-color: transparent;
+}
+
+QTreeView::branch:has-siblings:!adjoins-item {
+    border-image: url(vline.png) 0;
+}
+
+QTreeView::branch:has-siblings:adjoins-item {
+    border-image: url(branch-more.png) 0;
+}
+
+QTreeView::branch:!has-children:!has-siblings:adjoins-item {
+    border-image: url(branch-end.png) 0;
+}
+
+QTreeView::branch:has-children:!has-siblings:closed,
+QTreeView::branch:closed:has-children:has-siblings {
+    border-image: none;
+    image: url(branch-closed.png);
+}
+
+QTreeView::branch:open:has-children:!has-siblings,
+QTreeView::branch:open:has-children:has-siblings {
+    border-image: none;
+    image: url(branch-open.png);
 }
 
 /* 动画效果 - 通过属性动画实现 */

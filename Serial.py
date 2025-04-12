@@ -1,19 +1,26 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+主程序入口文件
+负责应用程序的初始化和主窗口的创建
+"""
+
 import sys
 import os
-from MainWindow import MainWindow
+
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QFile, QTextStream
 from theme_manager import ThemeManager
+from MainWindow import MainWindow
 
 def initialize_theme(app):
     """初始化并应用主题到整个应用程序"""
     try:
         # 创建主题管理器
-        theme_manager = ThemeManager()
+        theme_mgr = ThemeManager()
         # 应用当前主题
-        theme_manager.apply_theme(app)
+        theme_mgr.apply_theme(app)
         # 返回主题管理器实例
-        return theme_manager
+        return theme_mgr
     except Exception as e:
         print(f"初始化主题时出错: {str(e)}")
 

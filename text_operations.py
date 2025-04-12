@@ -1,9 +1,24 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+文本操作模块
+负责处理文本的查找、替换等操作
+"""
+
 from PyQt6.QtWidgets import QInputDialog, QMessageBox
 from PyQt6.QtGui import QTextCursor
 
 
 class TextOperations:
+    """文本操作类，处理文本的查找、替换等操作"""
+    
     def __init__(self, parent, text_edit):
+        """初始化文本操作类
+        
+        Args:
+            parent: 父窗口，用于显示对话框
+            text_edit: 文本编辑器组件
+        """
         self.parent = parent
         self.text_edit = text_edit
     

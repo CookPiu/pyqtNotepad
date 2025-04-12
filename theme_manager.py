@@ -1,3 +1,10 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+主题管理模块
+负责应用程序的主题样式管理，包括主题的加载、保存和切换
+"""
+
 import os
 from PyQt6.QtCore import QFile, QTextStream, QSettings
 

@@ -13,8 +13,8 @@ QMainWindow {
 
 /* 菜单栏样式 */
 QMenuBar {
-    background-color: #2d2d2d;
-    color: white;
+    background-color: #252525;
+    color: #d0d0d0;
     border-bottom: 1px solid #3d3d3d;
     padding: 2px;
     border-radius: 0px;
@@ -37,7 +37,7 @@ QMenuBar::item:pressed {
 
 /* 菜单样式 */
 QMenu {
-    background-color: #2d2d2d;
+    background-color: #252525;
     border: 1px solid #3d3d3d;
     border-radius: 6px;
     padding: 5px;
@@ -47,7 +47,7 @@ QMenu::item {
     padding: 6px 25px 6px 20px;
     border-radius: 4px;
     margin: 2px 5px;
-    color: #e0e0e0;
+    color: #d0d0d0;
 }
 
 QMenu::item:selected {
@@ -57,7 +57,7 @@ QMenu::item:selected {
 
 /* 工具栏样式 */
 QToolBar {
-    background-color: #2d2d2d;
+    background-color: #252525;
     border-bottom: 1px solid #3d3d3d;
     padding: 2px;
     spacing: 2px;
@@ -69,7 +69,7 @@ QToolBar QToolButton {
     border-radius: 4px;
     padding: 5px;
     margin: 1px;
-    color: #e0e0e0;
+    color: #d0d0d0;
 }
 
 QToolBar QToolButton:hover {
@@ -82,12 +82,12 @@ QToolBar QToolButton:pressed {
 
 /* 侧边栏样式 */
 QListWidget {
-    background-color: #2d2d2d;
+    background-color: #1e1e1e;
     border: 1px solid #3d3d3d;
     border-radius: 8px;
     padding: 5px;
     outline: none;
-    color: #e0e0e0;
+    color: #d0d0d0;
 }
 
 QListWidget::item {
@@ -107,37 +107,37 @@ QListWidget::item:selected {
 
 /* 文本编辑区样式 */
 QTextEdit {
-    background-color: #2d2d2d;
+    background-color: #1e1e1e;
     border: 1px solid #3d3d3d;
     border-radius: 8px;
     padding: 8px;
     selection-background-color: #3d3d3d;
     selection-color: white;
-    color: #e0e0e0;
+    color: #d0d0d0;
 }
 
 /* 行号区域样式 */
 LineNumberArea {
-    background-color: #252525;
+    background-color: #1a1a1a;
     border-right: 1px solid #3d3d3d;
     border-top-left-radius: 8px;
     border-bottom-left-radius: 8px;
     padding-right: 5px;
-    color: #888888;
+    color: #777777;
     font-size: 10pt;
 }
 
 /* 状态栏样式 */
 QStatusBar {
-    background-color: #2d2d2d;
-    color: #e0e0e0;
+    background-color: #252525;
+    color: #d0d0d0;
     border-top: 1px solid #3d3d3d;
 }
 
 /* 滚动条样式 */
 QScrollBar:vertical {
     border: none;
-    background: #252525;
+    background: #1a1a1a;
     width: 10px;
     border-radius: 5px;
     margin: 0px;
@@ -159,7 +159,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 
 QScrollBar:horizontal {
     border: none;
-    background: #252525;
+    background: #1a1a1a;
     height: 10px;
     border-radius: 5px;
     margin: 0px;
@@ -203,6 +203,25 @@ QPushButton:pressed {
     background-color: #5d5d5d;
 }
 
+/* 资源管理器按钮样式 */
+QPushButton#explorer_btn {
+    background-color: #3a3a3a;
+    color: #e0e0e0;
+    border: 1px solid #4d4d4d;
+    border-radius: 4px;
+    padding: 4px 8px;
+    min-width: 60px;
+    font-size: 11px;
+}
+
+QPushButton#explorer_btn:hover {
+    background-color: #4d4d4d;
+}
+
+QPushButton#explorer_btn:pressed {
+    background-color: #5d5d5d;
+}
+
 QPushButton:disabled {
     background-color: #4d4d4d;
     color: #888888;
@@ -213,9 +232,9 @@ QLineEdit {
     border: 1px solid #3d3d3d;
     border-radius: 5px;
     padding: 5px;
-    background-color: #2d2d2d;
+    background-color: #1e1e1e;
     selection-background-color: #1a5fb4;
-    color: #e0e0e0;
+    color: #d0d0d0;
 }
 
 QLineEdit:focus {
@@ -224,7 +243,7 @@ QLineEdit:focus {
 
 /* 标签样式 */
 QLabel {
-    color: #e0e0e0;
+    color: #d0d0d0;
 }
 
 /* 分隔线样式 */
@@ -240,6 +259,59 @@ QToolTip {
     border-radius: 4px;
     padding: 5px;
     opacity: 200;
+}
+
+/* 文件浏览器样式 */
+QTreeView {
+    background-color: #1e1e1e;
+    border: 1px solid #3d3d3d;
+    border-radius: 8px;
+    padding: 5px;
+    outline: none;
+    color: #d0d0d0;
+}
+
+QTreeView::item {
+    padding: 4px;
+    border-radius: 4px;
+    margin: 1px 0px;
+}
+
+QTreeView::item:hover {
+    background-color: #3d3d3d;
+}
+
+QTreeView::item:selected {
+    background-color: #3d3d3d;
+    color: white;
+}
+
+QTreeView::branch {
+    background-color: transparent;
+}
+
+QTreeView::branch:has-siblings:!adjoins-item {
+    border-image: url(vline.png) 0;
+}
+
+QTreeView::branch:has-siblings:adjoins-item {
+    border-image: url(branch-more.png) 0;
+}
+
+QTreeView::branch:!has-children:!has-siblings:adjoins-item {
+    border-image: url(branch-end.png) 0;
+}
+
+QTreeView::branch:has-children:!has-siblings:closed,
+QTreeView::branch:closed:has-children:has-siblings {
+    border-image: none;
+    image: url(branch-closed.png);
+}
+
+QTreeView::branch:open:has-children:!has-siblings,
+QTreeView::branch:open:has-children:has-siblings {
+    border-image: none;
+    image: url(branch-open.png);
 }
 
 /* 动画效果 - 通过属性动画实现 */

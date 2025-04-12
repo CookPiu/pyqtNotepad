@@ -1,13 +1,28 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+格式操作模块
+负责处理文本格式化、字体颜色更改、图片插入等操作
+"""
+
 import os
 import base64
 from PyQt6.QtWidgets import QFontDialog, QColorDialog, QFileDialog, QMessageBox
-from PyQt6.QtGui import QImage, QImageWriter
+from PyQt6.QtGui import QImage, QImageWriter, QTextDocument
 from PyQt6.QtCore import Qt, QUrl, QByteArray, QBuffer
-from PyQt6.QtGui import QTextDocument
 
 
 class FormatOperations:
+    """格式操作类，处理文本格式化、字体颜色更改、图片插入等操作"""
+    
     def __init__(self, parent, text_edit, status_bar):
+        """初始化格式操作类
+        
+        Args:
+            parent: 父窗口，用于显示对话框
+            text_edit: 文本编辑器组件
+            status_bar: 状态栏组件，用于显示操作状态
+        """
         self.parent = parent
         self.text_edit = text_edit
         self.statusBar = status_bar

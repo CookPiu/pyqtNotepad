@@ -1,103 +1,25 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+主窗口模块
+包含应用程序的主窗口类及相关功能
+"""
+
 import sys
 import os
 from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QTextEdit, QListWidget, QListWidgetItem, QToolBar, QMenuBar, QMenu,
                              QStatusBar, QFileDialog, QFontDialog, QColorDialog, QMessageBox,
-                             QInputDialog)
+                             QInputDialog, QSplitter)
 from PyQt6.QtGui import QAction, QFont, QColor, QTextCursor, QIcon, QImage, QTextDocument, QPainter
 from PyQt6.QtCore import Qt, QSize, QUrl, QRect, QEvent, pyqtSignal, QPointF, QFile, QTextStream
+
 from theme_manager import ThemeManager
+from file_explorer import FileExplorer
+from ui_components import LineNumberArea, TextEditWithLineNumbers
 
 
-class LineNumberArea(QWidget):
-    def __init__(self, editor):
-        super().__init__(editor)
-        self.editor = editor
-        self.setFixedWidth(40)  # 初始宽度，会根据行号数量自动调整
-
-    def paintEvent(self, event):
-        # 绘制行号区域
-        painter = QPainter(self)
-        painter.fillRect(event.rect(), Qt.GlobalColor.lightGray)
-        
-        # 获取可见区域的第一个块
-        block = self.editor.firstVisibleBlock()
-        block_number = block.blockNumber()
-        top = self.editor.blockBoundingGeometry(block).translated(self.editor.contentOffset()).top()
-        bottom = top + self.editor.blockBoundingRect(block).height()
-        
-        # 绘制行号
-        while block.isValid() and top <= event.rect().bottom():
-            if block.isVisible() and bottom >= event.rect().top():
-                number = str(block_number + 1)
-                painter.setPen(Qt.GlobalColor.black)
-                # 创建一个矩形区域来绘制文本
-                rect = QRect(0, int(top), self.width() - 5, self.editor.fontMetrics().height())
-                painter.drawText(rect, Qt.AlignmentFlag.AlignRight, number)
-            
-            block = block.next()
-            top = bottom
-            bottom = top + self.editor.blockBoundingRect(block).height()
-            block_number += 1
-
-
-class TextEditWithLineNumbers(QTextEdit):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.line_number_area = LineNumberArea(self)
-        
-        # 连接信号以更新行号区域
-        self.document().blockCountChanged.connect(self.update_line_number_area_width)
-        self.verticalScrollBar().valueChanged.connect(self.update_line_number_area)
-        self.textChanged.connect(self.update_line_number_area)
-        self.document().documentLayoutChanged.connect(self.update_line_number_area)
-        
-        # 初始化行号区域宽度
-        self.update_line_number_area_width(0)
-    
-    def firstVisibleBlock(self):
-        # 获取可见区域的第一个文本块
-        cursor = QTextCursor(self.document())
-        cursor.movePosition(QTextCursor.MoveOperation.Start)
-        for i in range(self.document().blockCount()):
-            block = self.document().findBlockByNumber(i)
-            rect = self.document().documentLayout().blockBoundingRect(block)
-            if rect.translated(0, -self.verticalScrollBar().value()).top() >= 0:
-                return block
-            cursor.movePosition(QTextCursor.MoveOperation.NextBlock)
-        return self.document().firstBlock()
-    
-    def blockBoundingGeometry(self, block):
-        # 获取块的几何信息
-        return self.document().documentLayout().blockBoundingRect(block)
-    
-    def blockBoundingRect(self, block):
-        # 获取块的边界矩形
-        return self.document().documentLayout().blockBoundingRect(block)
-    
-    def contentOffset(self):
-        # 获取内容偏移
-        return QPointF(0, -self.verticalScrollBar().value())
-    
-    def update_line_number_area_width(self, _):
-        # 更新行号区域宽度
-        digits = len(str(max(1, self.document().blockCount())))
-        width = 10 + self.fontMetrics().horizontalAdvance('9') * digits
-        if self.line_number_area.width() != width:
-            self.line_number_area.setFixedWidth(width)
-            self.setViewportMargins(width, 0, 0, 0)
-    
-    def update_line_number_area(self):
-        # 更新行号区域
-        self.line_number_area.update(0, 0, self.line_number_area.width(), self.height())
-        if self.verticalScrollBar().value() != self.verticalScrollBar().maximum():
-            self.setViewportMargins(self.line_number_area.width(), 0, 0, 0)
-    
-    def resizeEvent(self, event):
-        # 调整大小时更新行号区域
-        super().resizeEvent(event)
-        cr = self.contentsRect()
-        self.line_number_area.setGeometry(QRect(cr.left(), cr.top(), self.line_number_area.width(), cr.height()))
+# 主窗口类定义
 
 
 class MainWindow(QMainWindow):
@@ -145,10 +67,13 @@ class MainWindow(QMainWindow):
             action.triggered.connect(item["action"])
             self.toolbar.addAction(action)
         
-        # 创建侧边栏（添加功能占位符）
+        # 创建侧边栏容器（使用QSplitter分割上下两部分）
+        self.sidebar_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.sidebar_splitter.setMaximumWidth(200)
+        self.sidebar_splitter.setMinimumWidth(150)
+        
+        # 创建上半部分功能列表
         self.sidebar = QListWidget()
-        self.sidebar.setMaximumWidth(200)
-        self.sidebar.setMinimumWidth(150)
         
         # 添加侧边栏功能占位符
         sidebar_items = [
@@ -168,13 +93,24 @@ class MainWindow(QMainWindow):
         # 连接点击事件（目前只显示消息）
         self.sidebar.itemClicked.connect(self.sidebar_item_clicked)
         
+        # 创建下半部分文件浏览器
+        self.file_explorer = FileExplorer()
+        self.file_explorer.file_double_clicked.connect(self.open_file_from_explorer)
+        
+        # 将两部分添加到分割器中
+        self.sidebar_splitter.addWidget(self.sidebar)
+        self.sidebar_splitter.addWidget(self.file_explorer)
+        
+        # 设置初始分割比例（上半部分占40%，下半部分占60%）
+        self.sidebar_splitter.setSizes([200, 300])
+        
         # 创建带行号的富文本编辑区
         self.text_edit = TextEditWithLineNumbers()
         self.text_edit.setFontPointSize(12)
         
         # 创建编辑区布局
         edit_layout = QHBoxLayout()
-        edit_layout.addWidget(self.sidebar)
+        edit_layout.addWidget(self.sidebar_splitter)
         edit_layout.addWidget(self.text_edit)
         
         # 将编辑区布局添加到主布局
@@ -405,27 +341,67 @@ class MainWindow(QMainWindow):
     
     def replace_text(self):
         # 简单实现，实际应用中可以添加一个替换对话框
-        find_text, ok = QInputDialog.getText(self, "替换", "输入要查找的文本:")
+        find_text, ok = QInputDialog.getText(self, "查找", "输入要查找的文本:")
         if ok and find_text:
             replace_text, ok = QInputDialog.getText(self, "替换", "输入要替换的文本:")
-            if ok:
+            if ok:  # 即使替换文本为空也执行替换
                 cursor = self.text_edit.textCursor()
                 # 保存原始位置
                 original_position = cursor.position()
                 # 从头开始查找
                 cursor.movePosition(QTextCursor.Start)
                 self.text_edit.setTextCursor(cursor)
-                found = False
-                while self.text_edit.find(find_text):
-                    found = True
-                    cursor = self.text_edit.textCursor()
-                    cursor.insertText(replace_text)
                 
-                if not found:
-                    # 如果没找到，恢复原始位置
+                # 查找并替换所有匹配项
+                count = 0
+                while self.text_edit.find(find_text):
+                    # 获取当前选择
+                    cursor = self.text_edit.textCursor()
+                    # 替换选中的文本
+                    cursor.insertText(replace_text)
+                    count += 1
+                
+                if count > 0:
+                    self.statusBar.showMessage(f"已替换 {count} 处匹配项")
+                else:
+                    # 如果没有找到匹配项，恢复原始光标位置
+                    cursor = self.text_edit.textCursor()
                     cursor.setPosition(original_position)
                     self.text_edit.setTextCursor(cursor)
-                    QMessageBox.information(self, "替换", f"未找到 '{find_text}'")
+                    self.statusBar.showMessage("未找到匹配项")
+    
+    def open_file_from_explorer(self, file_path):
+        """从文件浏览器打开文件"""
+        if self.maybe_save():
+            try:
+                # 根据文件扩展名决定如何打开
+                _, ext = os.path.splitext(file_path)
+                # 图片和二进制文件类型
+                binary_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.pdf', '.exe', '.dll']
+                
+                if ext.lower() == '.html':
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        html = f.read()
+                    self.text_edit.setHtml(html)
+                elif ext.lower() in binary_extensions:
+                    QMessageBox.information(self, "不支持的文件类型", f"无法打开二进制文件: {ext}")
+                    return
+                else:
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            text = f.read()
+                        self.text_edit.setPlainText(text)
+                    except UnicodeDecodeError:
+                        QMessageBox.information(self, "不支持的文件类型", "此文件可能是二进制文件，无法打开。")
+                        return
+                
+                self.current_file = file_path
+                # 重置文档修改状态
+                self.text_edit.document().setModified(False)
+                self.statusBar.showMessage(f"已打开: {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"打开文件时出错: {str(e)}")
+                return
     
     def insert_image(self):
         # 打开文件对话框选择图片
@@ -488,6 +464,9 @@ class MainWindow(QMainWindow):
             app = QApplication.instance()
             # 应用主题
             self.theme_manager.apply_theme(app)
+            # 更新文件浏览器主题
+            if hasattr(self, 'file_explorer'):
+                self.file_explorer.update_theme(self.theme_manager.get_current_theme())
             # 更新状态栏消息
             theme_name = "白色" if self.theme_manager.get_current_theme() == ThemeManager.LIGHT_THEME else "黑色"
             self.statusBar.showMessage(f"已应用{theme_name}主题", 3000)
@@ -503,6 +482,13 @@ class MainWindow(QMainWindow):
         # 显示主题切换消息
         theme_name = "白色" if self.theme_manager.get_current_theme() == ThemeManager.LIGHT_THEME else "黑色"
         QMessageBox.information(self, "主题切换", f"已切换到{theme_name}主题")
+    
+    def closeEvent(self, event):
+        """重写关闭事件，在关闭窗口前检查是否需要保存文件"""
+        if self.maybe_save():
+            event.accept()
+        else:
+            event.ignore()
 
 
 # 这里不需要main函数，因为主程序在Serial.py中

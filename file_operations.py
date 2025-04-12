@@ -1,9 +1,25 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+文件操作模块
+负责处理文件的打开、保存等操作
+"""
+
 import os
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 
 class FileOperations:
+    """文件操作类，处理文件的新建、打开、保存等操作"""
+    
     def __init__(self, parent, text_edit, status_bar):
+        """初始化文件操作类
+        
+        Args:
+            parent: 父窗口，用于显示对话框
+            text_edit: 文本编辑器组件
+            status_bar: 状态栏组件，用于显示操作状态
+        """
         self.parent = parent
         self.text_edit = text_edit
         self.statusBar = status_bar
