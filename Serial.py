@@ -1,16 +1,10 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-主程序入口文件
-负责应用程序的初始化和主窗口的创建
-"""
-
 import sys
 import os
 
-from PyQt6.QtWidgets import QApplication
-from theme_manager import ThemeManager
 from MainWindow import MainWindow
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QFile, QTextStream
+from theme_manager import ThemeManager
 
 def initialize_theme(app):
     """初始化并应用主题到整个应用程序"""

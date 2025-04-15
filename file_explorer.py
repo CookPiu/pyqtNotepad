@@ -1,10 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-文件浏览器模块
-提供文件系统浏览功能
-"""
-
 import os
 from PyQt6.QtWidgets import QTreeView, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QInputDialog, QMessageBox
 from PyQt6.QtGui import QFileSystemModel, QIcon
