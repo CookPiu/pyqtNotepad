@@ -357,11 +357,18 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
     
-    # 侧边栏功能占位符点击事件
+    # 侧边栏功能点击事件
     def sidebar_item_clicked(self, item):
-        # 显示消息，表明这只是一个占位符功能
-        self.statusBar.showMessage(f"'{item.text()}'是功能占位符，尚未实现实际功能")
-        QMessageBox.information(self, "功能占位符", f"'{item.text()}'功能尚未实现，这只是一个UI占位符。")
+        if item.text() == "计时器":
+            # 打开计时器窗口
+            from timer import TimerWindow
+            self.timer_window = TimerWindow(self)
+            self.timer_window.show()
+            self.statusBar.showMessage(f"已打开{item.text()}功能")
+        else:
+            # 其他功能仍然显示占位符消息
+            self.statusBar.showMessage(f"'{item.text()}'是功能占位符，尚未实现实际功能")
+            QMessageBox.information(self, "功能占位符", f"'{item.text()}'功能尚未实现，这只是一个UI占位符。")
     
     def new_file(self):
         if self.maybe_save():
@@ -582,7 +589,7 @@ class MainWindow(QMainWindow):
     
     def show_about(self):
         QMessageBox.about(self, "关于多功能记事本", 
-                         "多功能记事本 v1.0\n\n一个基于PyQt6的简单记事本应用，支持HTML格式和图片插入。")
+                         "多功能记事本 v1.1\n\n一个基于PyQt6的简单记事本应用，支持HTML格式和图片插入。支持计时器功能")
     
     def apply_current_theme(self):
         """应用当前主题样式表"""
