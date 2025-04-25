@@ -8,6 +8,9 @@ from PyQt6.QtGui import QAction, QFont, QColor, QTextCursor, QIcon, QImage, QTex
 from PyQt6.QtCore import Qt, QSize, QUrl, QRect, QEvent, pyqtSignal, QPointF, QFile, QTextStream
 from theme_manager import ThemeManager
 from file_explorer import FileExplorer
+import fitz  # PyMuPDF库
+from pdf_utils import extract_pdf_content, cleanup_temp_images
+from pdf_viewer import PDFViewer
 
 
 class LineNumberArea(QWidget):
@@ -155,6 +158,9 @@ class MainWindow(QMainWindow):
         
         # 初始化主题管理器
         self.theme_manager = ThemeManager()
+        
+        # 初始化PDF临时目录变量
+        self.current_pdf_temp_dir = None
         
         self.initUI()
         
@@ -372,13 +378,18 @@ class MainWindow(QMainWindow):
     
     def new_file(self):
         if self.maybe_save():
+            # 清理之前PDF文件的临时图片
+            if self.current_pdf_temp_dir:
+                cleanup_temp_images(self.current_pdf_temp_dir)
+                self.current_pdf_temp_dir = None
+                
             self.text_edit.clear()
             self.current_file = None
             self.statusBar.showMessage("新建文件")
     
     def open_file(self):
         if self.maybe_save():
-            file_name, _ = QFileDialog.getOpenFileName(self, "打开文件", "", "HTML文件 (*.html);;文本文件 (*.txt);;所有文件 (*)")
+            file_name, _ = QFileDialog.getOpenFileName(self, "打开文件", "", "HTML文件 (*.html);;文本文件 (*.txt);;PDF文件 (*.pdf);;所有文件 (*)")
             if file_name:
                 # 根据文件扩展名决定如何打开
                 _, ext = os.path.splitext(file_name)
@@ -386,10 +397,27 @@ class MainWindow(QMainWindow):
                     with open(file_name, 'r', encoding='utf-8') as f:
                         html = f.read()
                     self.text_edit.setHtml(html)
+                elif ext.lower() == '.pdf':
+                    try:
+                        # 打开PDF预览窗口
+                        self.open_pdf_preview(file_name)
+                    except Exception as e:
+                        QMessageBox.critical(self, "错误", f"无法打开PDF文件: {str(e)}")
+                        return
                 else:
-                    with open(file_name, 'r', encoding='utf-8') as f:
-                        text = f.read()
-                    self.text_edit.setPlainText(text)
+                    try:
+                        with open(file_name, 'r', encoding='utf-8') as f:
+                            text = f.read()
+                        self.text_edit.setPlainText(text)
+                    except UnicodeDecodeError:
+                        # 尝试使用其他编码
+                        try:
+                            with open(file_name, 'r', encoding='gbk') as f:
+                                text = f.read()
+                            self.text_edit.setPlainText(text)
+                        except Exception as e:
+                            QMessageBox.critical(self, "错误", f"无法打开文件: {str(e)}")
+                            return
                 self.current_file = file_name
                 self.statusBar.showMessage(f"已打开: {file_name}")
     
@@ -408,7 +436,12 @@ class MainWindow(QMainWindow):
             return self.save_file_as()
     
     def save_file_as(self):
-        file_name, selected_filter = QFileDialog.getSaveFileName(self, "保存文件", "", "HTML文件 (*.html);;文本文件 (*.txt);;所有文件 (*)")
+        # 如果当前文件是PDF，默认保存为文本格式
+        default_filter = "文本文件 (*.txt)"
+        if self.current_file and self.current_file.lower().endswith('.pdf'):
+            default_filter = "文本文件 (*.txt)"
+            
+        file_name, selected_filter = QFileDialog.getSaveFileName(self, "保存文件", "", "HTML文件 (*.html);;文本文件 (*.txt);;所有文件 (*)", default_filter)
         if file_name:
             # 确保文件有正确的扩展名
             _, ext = os.path.splitext(file_name)
@@ -445,6 +478,37 @@ class MainWindow(QMainWindow):
         elif ret == QMessageBox.StandardButton.Cancel:
             return False
         return True
+        
+    def open_pdf_preview(self, pdf_path):
+        """打开PDF预览窗口"""
+        # 清理之前PDF文件的临时图片
+        if self.current_pdf_temp_dir:
+            cleanup_temp_images(self.current_pdf_temp_dir)
+            self.current_pdf_temp_dir = None
+            
+        # 创建PDF预览窗口
+        pdf_viewer = PDFViewer(pdf_path, self)
+        
+        # 连接转换信号
+        pdf_viewer.convert_to_html_signal.connect(self.convert_pdf_to_html)
+        
+        # 显示PDF预览窗口
+        pdf_viewer.exec()
+        
+    def convert_pdf_to_html(self, pdf_path):
+        """将PDF转换为HTML并显示"""
+        try:
+            # 使用pdf_utils模块处理PDF文件
+            html_content, temp_dir = extract_pdf_content(pdf_path, self)
+            if html_content:
+                # 保存临时目录路径，以便后续清理
+                self.current_pdf_temp_dir = temp_dir
+                # 显示HTML内容
+                self.text_edit.setHtml(html_content)
+                self.statusBar.showMessage(f"已转换为HTML: {pdf_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"无法转换PDF文件: {str(e)}")
+            return
     
     def change_font(self):
         current = self.text_edit.currentFont()
@@ -511,12 +575,19 @@ class MainWindow(QMainWindow):
                 # 根据文件扩展名决定如何打开
                 _, ext = os.path.splitext(file_path)
                 # 图片和二进制文件类型
-                binary_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.pdf', '.exe', '.dll']
+                binary_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.exe', '.dll']
                 
                 if ext.lower() == '.html':
                     with open(file_path, 'r', encoding='utf-8') as f:
                         html = f.read()
                     self.text_edit.setHtml(html)
+                elif ext.lower() == '.pdf':
+                    try:
+                        # 打开PDF预览窗口
+                        self.open_pdf_preview(file_path)
+                    except Exception as e:
+                        QMessageBox.critical(self, "错误", f"无法打开PDF文件: {str(e)}")
+                        return
                 elif ext.lower() in binary_extensions:
                     QMessageBox.information(self, "不支持的文件类型", f"无法打开二进制文件: {ext}")
                     return
@@ -526,8 +597,14 @@ class MainWindow(QMainWindow):
                             text = f.read()
                         self.text_edit.setPlainText(text)
                     except UnicodeDecodeError:
-                        QMessageBox.information(self, "不支持的文件类型", "此文件可能是二进制文件，无法打开。")
-                        return
+                        # 尝试使用其他编码
+                        try:
+                            with open(file_path, 'r', encoding='gbk') as f:
+                                text = f.read()
+                            self.text_edit.setPlainText(text)
+                        except Exception as e:
+                            QMessageBox.critical(self, "错误", f"无法打开文件: {str(e)}")
+                            return
                 
                 self.current_file = file_path
                 # 重置文档修改状态
@@ -620,6 +697,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """重写关闭事件，在关闭窗口前检查是否需要保存文件"""
         if self.maybe_save():
+            # 清理临时图片文件
+            if self.current_pdf_temp_dir:
+                cleanup_temp_images(self.current_pdf_temp_dir)
             event.accept()
         else:
             event.ignore()
