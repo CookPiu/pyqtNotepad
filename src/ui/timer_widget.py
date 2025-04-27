@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLa
                              QTabWidget, QGridLayout, QCheckBox, QApplication)
 from PyQt6.QtCore import Qt, QTimer, QTime, QSize, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
-from theme_manager import ThemeManager
+from src.utils.theme_manager import ThemeManager # Updated import path
 
 
 class TimerWindow(QMainWindow):

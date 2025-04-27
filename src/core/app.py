@@ -1,15 +1,15 @@
 import sys
 import os
-
-from MainWindow import MainWindow
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QFile, QTextStream
-from theme_manager import ThemeManager
+
+# 这些导入路径将在后续步骤中创建/移动相应文件后生效
+from src.ui.main_window import MainWindow
+from src.utils.theme_manager import ThemeManager
 
 def initialize_theme(app):
     """初始化并应用主题到整个应用程序"""
     try:
-        # 创建主题管理器
+        # 创建主题管理器 (假设 ThemeManager 将移至 src/utils)
         theme_mgr = ThemeManager()
         # 应用当前主题
         theme_mgr.apply_theme(app)
@@ -18,11 +18,16 @@ def initialize_theme(app):
     except Exception as e:
         print(f"初始化主题时出错: {str(e)}")
 
-if __name__ == '__main__':
+def run_application():
+    """创建并运行 PyQt 应用程序"""
     app = QApplication(sys.argv)
+
     # 初始化主题
     initialize_theme(app)
-    # 创建并显示主窗口
+
+    # 创建并显示主窗口 (假设 MainWindow 将移至 src/ui)
     window = MainWindow()
     window.show()
+
+    # 启动应用程序事件循环
     sys.exit(app.exec())

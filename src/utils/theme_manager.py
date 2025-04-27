@@ -55,9 +55,11 @@ class ThemeManager:
     
     def _load_stylesheet(self, filename):
         """加载样式表文件"""
-        file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+        # Corrected path calculation: Go up two directories from src/utils to project root, then into assets
+        assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets"))
+        file_path = os.path.join(assets_dir, filename)
         qss_file = QFile(file_path)
-        
+
         if qss_file.exists() and qss_file.open(QFile.OpenModeFlag.ReadOnly | QFile.OpenModeFlag.Text):
             stream = QTextStream(qss_file)
             stylesheet = stream.readAll()
