@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QTextEdit, QListWidget, QListWidgetItem, QToolBar, QMenuBar, QMenu,
                              QStatusBar, QFileDialog, QFontDialog, QColorDialog, QMessageBox,
@@ -17,6 +18,8 @@ from src.ui.timer_widget import TimerWindow # Renamed from timer.py
 from src.ui.editor import TextEditWithLineNumbers # Import the editor component
 from src.ui.calculator_widget import CalculatorWindow
 from src.ui.calendar_widget import CalendarWindow
+from src.ui.sticky_note_widget import StickyNote, StickyNoteWindow
+from src.ui.todo_widget import TodoWidget
 
 
 class MainWindow(QMainWindow):
@@ -28,8 +31,19 @@ class MainWindow(QMainWindow):
         self.theme_manager = ThemeManager()
         self.untitled_counter = 0
         self.previous_editor = None
+        
+        # 初始化便签列表
+        self.sticky_notes = []
+        
         self.initUI()
         self.apply_current_theme()
+        
+        # 加载保存的便签
+        try:
+            self.load_sticky_notes()
+        except Exception as e:
+            print(f"加载便签时出错: {str(e)}")
+        
         # Check if tab widget is empty before creating a new file
         if self.tab_widget.count() == 0:
             self.new_file()
@@ -307,6 +321,59 @@ class MainWindow(QMainWindow):
             else:
                  self.calendar_window.activateWindow()
             self.statusBar.showMessage(f"已打开 {item.text()} 功能")
+        elif item.text() == "便签":
+            try:
+                # 直接创建一个新便签
+                if not hasattr(self, 'sticky_notes'):
+                    self.sticky_notes = []
+                
+                # 创建新便签
+                sticky_note = StickyNote(parent=self)
+                
+                # 安全连接信号
+                try:
+                    sticky_note.closed.connect(self.on_sticky_note_closed)
+                except Exception:
+                    pass
+                    
+                # 显示便签
+                sticky_note.show()
+                
+                # 添加到便签列表
+                self.sticky_notes.append(sticky_note)
+                
+                self.statusBar.showMessage(f"已创建新便签")
+            except Exception as e:
+                print(f"创建便签时出错: {str(e)}")
+                self.statusBar.showMessage(f"创建便签失败")
+        elif item.text() == "待办事项":
+            # 检查待办事项窗口是否已经存在
+            if not hasattr(self, 'todo_window') or not self.todo_window.isVisible():
+                 try:
+                     # 尝试创建data目录（如果不存在）
+                     os.makedirs("data", exist_ok=True)
+                     
+                     # 确保todo.json文件存在且格式正确
+                     todo_path = os.path.join("data", "todo.json")
+                     if not os.path.exists(todo_path):
+                         # 创建一个空的todo.json文件
+                         with open(todo_path, "w", encoding="utf-8") as f:
+                             json.dump([], f)
+                         print(f"创建了新的待办事项文件: {todo_path}")
+                         
+                     self.todo_window = TodoWidget(self)
+                     self.todo_window.show()
+                     self.statusBar.showMessage(f"已打开 {item.text()} 功能")
+                 except Exception as e:
+                     print(f"打开待办事项窗口出错: {str(e)}")
+                     import traceback
+                     traceback.print_exc()
+                     # 显示更具体的错误消息
+                     QMessageBox.critical(self, "错误", f"无法打开待办事项功能:\n{str(e)}")
+                     self.statusBar.showMessage(f"打开待办事项失败")
+            else:
+                 self.todo_window.activateWindow()
+                 self.statusBar.showMessage(f"已打开 {item.text()} 功能")
         else:
             self.statusBar.showMessage(f"'{item.text()}' 是功能占位符，尚未实现实际功能")
             QMessageBox.information(self, "功能占位符", f"'{item.text()}' 功能尚未实现。")
@@ -767,15 +834,157 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         # This function remains mostly the same
         if self.maybe_save_all(): # Check if user wants to save changes
-            # Cleanup temporary PDF directories before closing
-            for i in range(self.tab_widget.count()):
-                widget = self.tab_widget.widget(i)
-                if isinstance(widget, TextEditWithLineNumbers):
-                    if temp_dir := widget.property("pdf_temp_dir"):
-                        cleanup_temp_images(temp_dir) # Use imported function
-            event.accept() # Allow closing
+            try:
+                # Cleanup temporary PDF directories before closing
+                for i in range(self.tab_widget.count()):
+                    widget = self.tab_widget.widget(i)
+                    if isinstance(widget, TextEditWithLineNumbers):
+                        if temp_dir := widget.property("pdf_temp_dir"):
+                            cleanup_temp_images(temp_dir) # Use imported function
+                            
+                # 保存并关闭所有打开的便签
+                try:
+                    if hasattr(self, 'sticky_notes'):
+                        # 保存所有便签数据
+                        self.save_sticky_notes()
+                        
+                        # 然后关闭所有便签（使用副本防止迭代错误）
+                        notes_to_close = list(self.sticky_notes)
+                        for note in notes_to_close:
+                            if note.isVisible():
+                                # 断开信号连接，防止循环
+                                try:
+                                    note.closed.disconnect(self.on_sticky_note_closed)
+                                except:
+                                    pass
+                                note.close()
+                except Exception as e:
+                    print(f"关闭便签时出错: {str(e)}")
+                    
+                # 关闭待办事项窗口
+                try:
+                    if hasattr(self, 'todo_window') and self.todo_window and self.todo_window.isVisible():
+                        self.todo_window.close()
+                except Exception as e:
+                    print(f"关闭待办事项窗口时出错: {str(e)}")
+                    
+                # 关闭其他功能窗口
+                for window_name in ['timer_window', 'calculator_window', 'calendar_window']:
+                    try:
+                        if hasattr(self, window_name):
+                            window = getattr(self, window_name)
+                            if window and window.isVisible():
+                                window.close()
+                    except Exception as e:
+                        print(f"关闭 {window_name} 时出错: {str(e)}")
+                            
+                event.accept() # Allow closing
+            except Exception as e:
+                print(f"关闭应用程序时出错: {str(e)}")
+                event.accept()  # 确保应用程序可以关闭
         else:
             event.ignore() # Prevent closing
+            
+    # 处理便签关闭事件
+    def on_sticky_note_closed(self, note_id):
+        """处理便签关闭事件"""
+        try:
+            # 从便签列表中移除已关闭的便签
+            if not hasattr(self, 'sticky_notes'):
+                return
+                
+            # 找到要移除的便签
+            note_to_remove = None
+            for note in self.sticky_notes:
+                if hasattr(note, 'note_id') and note.note_id == note_id:
+                    note_to_remove = note
+                    break
+                    
+            # 如果找到了，从列表中移除
+            if note_to_remove in self.sticky_notes:
+                self.sticky_notes.remove(note_to_remove)
+                
+        except Exception as e:
+            print(f"处理便签关闭事件出错: {str(e)}")
+            
+    # 加载便签数据
+    def load_sticky_notes(self):
+        try:
+            # 确保初始化便签列表
+            if not hasattr(self, 'sticky_notes'):
+                self.sticky_notes = []
+                
+            notes_file = os.path.join("data", "notes.json")
+            if not os.path.exists(notes_file):
+                return
+                
+            with open(notes_file, "r", encoding="utf-8") as f:
+                notes_data = json.load(f)
+                
+            # 创建便签
+            for note_data in notes_data:
+                try:
+                    if not note_data or not isinstance(note_data, dict):
+                        continue
+                        
+                    # 检查必要的字段是否存在
+                    if "id" not in note_data:
+                        continue
+                        
+                    sticky_note = StickyNote(
+                        note_id=note_data.get("id"),
+                        content=note_data.get("content", ""),
+                        color=note_data.get("color", "#ffff99"),
+                        geometry=note_data.get("geometry"),
+                        parent=self
+                    )
+                    
+                    # 安全地连接信号
+                    try:
+                        sticky_note.closed.connect(self.on_sticky_note_closed)
+                    except Exception:
+                        pass
+                        
+                    self.sticky_notes.append(sticky_note)
+                except Exception as e:
+                    print(f"创建便签时出错: {str(e)}")
+                    continue
+                    
+            return True
+        except Exception as e:
+            print(f"加载便签失败: {str(e)}")
+            # 不向用户显示错误消息，避免干扰用户体验
+            # QMessageBox.warning(self, "加载便签失败", f"无法加载便签: {str(e)}")
+            return False
+    
+    # 保存便签数据
+    def save_sticky_notes(self):
+        try:
+            notes_data = []
+            
+            # 收集所有便签数据
+            if hasattr(self, 'sticky_notes') and self.sticky_notes:
+                for note in list(self.sticky_notes):
+                    try:
+                        if note and note.isVisible():  # 确保便签有效且可见
+                            notes_data.append(note.get_data())
+                    except Exception as e:
+                        print(f"获取便签数据时出错: {str(e)}")
+                        continue
+            
+            # 确保目录存在
+            os.makedirs("data", exist_ok=True)
+            
+            # 写入文件
+            with open(os.path.join("data", "notes.json"), "w", encoding="utf-8") as f:
+                json.dump(notes_data, f, indent=2, ensure_ascii=False)
+                
+            return True
+        except Exception as e:
+            print(f"保存便签失败: {str(e)}")
+            # 不向用户显示错误消息，避免干扰用户体验
+            # QMessageBox.warning(self, "保存便签失败", f"无法保存便签: {str(e)}")
+            return False
 
 # Notes for further refactoring (optional):
 # - Consider moving Action/Menu/Toolbar creation into separate methods or classes.

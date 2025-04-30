@@ -18,9 +18,21 @@ def initialize_theme(app):
     except Exception as e:
         print(f"初始化主题时出错: {str(e)}")
 
+def ensure_data_directory():
+    """确保数据目录存在"""
+    try:
+        data_dir = os.path.join(os.getcwd(), "data")
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+    except Exception as e:
+        print(f"创建数据目录时出错: {str(e)}")
+
 def run_application():
     """创建并运行 PyQt 应用程序"""
     app = QApplication(sys.argv)
+
+    # 确保数据目录存在
+    ensure_data_directory()
 
     # 初始化主题
     initialize_theme(app)
