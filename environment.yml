@@ -1,0 +1,11 @@
+name: pynote_env # 你可以修改环境名称
+channels:
+  - conda-forge # 优先使用 conda-forge 获取包
+  - defaults
+dependencies:
+  - python=3.10 # 指定 Python 版本
+  - pyqt>=6.0   # PyQt6 的 Conda 包名通常是 pyqt
+  - pyqtwebengine>=6.0 # PyQt6-WebEngine 的 Conda 包名
+  - pip # 添加 pip 本身作为 Conda 依赖
+  - pip:
+    - PyMuPDF>=1.18 # 使用 pip 安装 PyMuPDF (包名通常区分大小写)

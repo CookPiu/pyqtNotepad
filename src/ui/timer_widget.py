@@ -756,8 +756,9 @@ class TimerWindow(QMainWindow):
             # 应用主题
             self.theme_manager.apply_theme(app)
             
-            # 根据当前主题调整UI元素的样式
-            is_dark = self.theme_manager.is_dark_theme()
+            # 根据当前主题调整UI元素的样式 (Corrected theme check)
+            from src.utils.theme_manager import ThemeManager # Import ThemeManager to access constant
+            is_dark = (self.theme_manager.get_current_theme() == ThemeManager.DARK_THEME) # ★ 修正：使用正确的检查方法
             
             # 调整背景颜色
             bg_color = "rgba(45, 45, 45, 80)" if is_dark else "rgba(240, 240, 240, 50)"

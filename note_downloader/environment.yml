@@ -1,0 +1,16 @@
+name: note_downloader_env  # Conda 环境名称
+channels:
+  - conda-forge         # 优先使用 conda-forge 频道
+  - defaults
+dependencies:
+  - python>=3.8         # 指定 Python 版本
+  - requests
+  - beautifulsoup4
+  - pyyaml
+  - tqdm
+  - lxml
+  - selenium            # 新增 Selenium
+  - webdriver-manager   # 新增 webdriver-manager
+  - pypdf2              # 新增，用于 PDF 文本提取
+  - python-pptx         # 新增，用于 PPTX 文本提取
+  - python-docx         # 新增，用于 DOCX 文本提取

@@ -1,0 +1,25 @@
+# 第一层：按后缀分类
+type_map:
+  PDF: [".pdf"]
+  PPT: [".ppt", ".pptx"]
+  DOC: [".doc", ".docx"]
+  ARCHIVE: [".zip", ".rar", ".7z"]
+  IMAGE: [".jpg", ".png", ".svg"]
+  EXECUTABLE: [".exe", ".dmg"]
+
+# 第二层：按关键词分类（优先于后缀）
+keyword_map:
+  Lectures: ["lecture", "讲义", "课件"]
+  Assignments: ["assignment", "作业"]
+  Syllabus: ["syllabus", "教学大纲"]
+  Projects: ["project", "报告"]
+  Exams: ["exam", "测试", "试卷"]
+
+# 第三层：按正则分类（更细或跨类型）
+regex_map:
+  "CS220": "CS220[0-9A-Za-z_-]*"
+  "ECommerce": "E[-_]Commerce"
+  "2024_25": "24_25|2024[-_]25"
+
+# Others 目录名称
+default: "Others"

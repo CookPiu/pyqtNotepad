@@ -166,7 +166,7 @@ class CalendarWindow(QMainWindow):
                 color: #2c3e50;
                 background-color: #f1f1f1;
                 font-size: 14px;
-                icon-size: 20px, 20px;
+                icon-size: 20px 20px; /* ★ 修正：移除逗号 */
                 border-radius: 4px;
             }
             QCalendarWidget QMenu {
@@ -449,13 +449,16 @@ class CalendarWindow(QMainWindow):
     
     def display_event_details(self, event_data):
         """显示事件详情"""
+        # 先处理描述中的换行符
+        description_html = event_data.get('description', '').replace('\n', '<br>')
+        
         details = f"""
         <h3>{event_data['title']}</h3>
         <p><b>日期:</b> {event_data['date']}</p>
         <p><b>时间:</b> {event_data['time']}</p>
         <p><b>类型:</b> {event_data['type']}</p>
         <p><b>提醒:</b> {'是' if event_data.get('reminder') else '否'}</p>
-        <p><b>描述:</b><br>{event_data.get('description', '').replace('\n', '<br>')}</p>
+        <p><b>描述:</b><br>{description_html}</p>
         """
         self.event_details.setHtml(details)
     
@@ -508,4 +511,4 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     calendar = CalendarWindow()
     calendar.show()
-    sys.exit(app.exec()) 
+    sys.exit(app.exec())

@@ -1,51 +1,56 @@
 import sys
 import os
-import json
 from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QTextEdit, QListWidget, QListWidgetItem, QToolBar, QMenuBar, QMenu,
                              QStatusBar, QFileDialog, QFontDialog, QColorDialog, QMessageBox,
-                             QInputDialog, QSplitter, QTabWidget) # Import QTabWidget
-from PyQt6.QtGui import QAction, QFont, QColor, QTextCursor, QIcon, QImage, QTextDocument, QPainter
-from PyQt6.QtCore import Qt, QSize, QUrl, QRect, QEvent, pyqtSignal, QPointF, QFile, QTextStream, QPoint, QSignalBlocker
+                              QInputDialog, QSplitter, QTabWidget, QToolButton, QDockWidget, QMenu, QSizePolicy) # Import QTabWidget, QToolButton, QDockWidget, QMenu, QSizePolicy
+from PyQt6.QtGui import QAction, QFont, QColor, QTextCursor, QIcon, QImage, QTextDocument, QPainter # Corrected indentation
+# Import QUrl for setting browser URL and QWebEngineView for the browser widget
+from PyQt6.QtCore import Qt, QSize, QUrl, QRect, QEvent, pyqtSignal, QPointF, QFile, QTextStream, QPoint, QSignalBlocker, QDateTime # Corrected indentation
+# Ensure WebEngineWidgets is imported before QApplication instance (usually satisfied by top-level import)
+from PyQt6.QtWebEngineWidgets import QWebEngineView # Corrected indentation
 import fitz  # PyMuPDF库
 
-# Updated imports for moved components
+# Updated imports for moved components # Corrected indentation
 from src.utils.theme_manager import ThemeManager
 from src.ui.file_explorer import FileExplorer
 from src.utils.pdf_utils import extract_pdf_content, cleanup_temp_images
 from src.ui.pdf_viewer import PDFViewer
-from src.ui.timer_widget import TimerWindow # Renamed from timer.py
+# from src.ui.timer_widget import TimerWindow # Replaced by CombinedToolsWidget
 from src.ui.editor import TextEditWithLineNumbers # Import the editor component
 from src.ui.calculator_widget import CalculatorWindow
-from src.ui.calendar_widget import CalendarWindow
-from src.ui.sticky_note_widget import StickyNote, StickyNoteWindow
-from src.ui.todo_widget import TodoWidget
+# from src.ui.calendar_widget import CalendarWindow # Replaced by CombinedToolsWidget
+# from src.ui.combined_notes_widget import CombinedNotesWidget # ✅ 组合控件, Replaced by CombinedToolsWidget
+from src.ui.combined_tools_widget import CombinedToolsWidget # ★ 新增组合工具控件
+# --- Added imports for Note Downloader ---
+import sys
+from pathlib import Path
+from .note_downloader_widget import NoteDownloaderWidget # Use relative import
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow): # Corrected indentation for the following block
     current_editor_changed = pyqtSignal(QTextEdit) # Keep QTextEdit for broader compatibility, or change to TextEditWithLineNumbers if specific methods are needed
 
     def __init__(self):
+        print("▶ MainWindow.__init__") # ★ 添加打印
         super().__init__()
         # Initialize ThemeManager using the correct import path
         self.theme_manager = ThemeManager()
         self.untitled_counter = 0
         self.previous_editor = None
-        
-        # 初始化便签列表
-        self.sticky_notes = []
-        
+        self.sidebar_original_width = 250 # Default width like VS Code suggestion
+        self.tool_docks = {} # Dictionary to store references to tool dock widgets
+        self._pre_zen_sizes = None # For saving splitter sizes before Zen mode
+        self._saved_sidebar_width = self.sidebar_original_width # For toggle sidebar
+        # 允许 Dock 自动分页 + 动画
+        self.setDockOptions(
+            QMainWindow.DockOption.AllowTabbedDocks
+            | QMainWindow.DockOption.AnimatedDocks
+        )
         self.initUI()
         self.apply_current_theme()
-        
-        # 加载保存的便签
-        try:
-            self.load_sticky_notes()
-        except Exception as e:
-            print(f"加载便签时出错: {str(e)}")
-        
         # Check if tab widget is empty before creating a new file
-        if self.tab_widget.count() == 0:
+        if self.tab_widget.count() == 0: # Corrected indentation
             self.new_file()
 
     def initUI(self):
@@ -56,90 +61,157 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
+        # --- Top Toolbar ---
         self.toolbar = QToolBar("主工具栏")
         self.toolbar.setIconSize(QSize(20, 20))
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonFollowStyle) # Show text on hover
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.toolbar)
 
+        # --- ActivityBar (Left Toolbar) ---
+        self.activity_bar = QToolBar("ActivityBar", self)
+        self.activity_bar.setOrientation(Qt.Orientation.Vertical)
+        self.activity_bar.setIconSize(QSize(20, 20))
+        self.activity_bar.setFixedWidth(48)            # VS Code 默认 48
+        self.activity_bar.setMovable(False)
+        # Styling will be handled by QSS primarily
+        # Add placeholder text/actions (remove icon loading)
+        files_action = self.activity_bar.addAction("Files", lambda: self.toggle_sidebar()) # Text instead of icon
+        files_action.setToolTip("文件资源管理器 (切换侧边栏)")
+        self.activity_bar.addSeparator()
+        # Add other placeholder actions
+        # search_action = self.activity_bar.addAction(QIcon(":/icons/search.svg"), "", self.search_action.trigger)
+        # search_action.setToolTip("搜索")
+        # --- Add Note Downloader action ---
+        act_download = self.activity_bar.addAction("DL")   # DL = Download 缩写
+        act_download.setToolTip("笔记下载器")
+        act_download.triggered.connect(lambda: (self.toggle_sidebar(False), self.open_note_downloader_tab())) # Show sidebar and open tab
+        self.activity_bar.addSeparator() # Optional separator
+        # ------------------------------------
+        self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, self.activity_bar) # Add to the left
+
+        # --- Initialize Browser View early ---
+        self.browser = QWebEngineView(self)
+        self.browser.setUrl(QUrl("about:blank")) # Default URL
+
+        # --- Tab Widget for Editors ---
         self.tab_widget = QTabWidget()
         self.tab_widget.setDocumentMode(True)
         self.tab_widget.setTabsClosable(True)
         self.tab_widget.setMovable(True)
         self.tab_widget.tabCloseRequested.connect(self.close_tab)
-        # Connect currentChanged later, after UI is fully initialized
 
-        # --- Sidebar Splitter ---
-        self.sidebar_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.sidebar_splitter.setHandleWidth(1)
+        # --- Vertical Splitter for original sidebar content (List + Explorer) ---
+        self.sidebar_content_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.sidebar_content_splitter.setHandleWidth(1)
 
         # --- Sidebar Function List ---
-        self.sidebar = QListWidget()
+        self.function_list = QListWidget() # Renamed from self.sidebar
         sidebar_items = [
-            {"name": "计时器", "icon": "clock"}, {"name": "待办事项", "icon": "task-list"},
-            {"name": "便签", "icon": "note"}, {"name": "计算器", "icon": "calculator"},
-            {"name": "日历", "icon": "calendar"}
+            {"name": "计时器",   "icon": "clock"},
+            {"name": "便签与待办","icon": "note"},   # 新条目
+            {"name": "计算器",   "icon": "calculator"},
+            {"name": "日历",     "icon": "calendar"},
+            {"name": "笔记下载", "icon": "download"},     # ★ 新增
         ]
         for item in sidebar_items:
             list_item = QListWidgetItem(item["name"])
             list_item.setToolTip(f"{item['name']}功能（占位符）")
             # You might want to associate icons properly here if available
-            self.sidebar.addItem(list_item)
-        self.sidebar.itemClicked.connect(self.sidebar_item_clicked)
+            self.function_list.addItem(list_item)
+        self.function_list.itemClicked.connect(self.sidebar_item_clicked)
 
         # --- File Explorer (using imported class) ---
         self.file_explorer = FileExplorer()
         self.file_explorer.file_double_clicked.connect(self.open_file_from_path)
 
-        # --- Add Widgets to Sidebar Splitter ---
-        self.sidebar_splitter.addWidget(self.sidebar)
-        self.sidebar_splitter.addWidget(self.file_explorer)
-        self.sidebar_splitter.setSizes([200, 400])
+        # --- Add Widgets to the VERTICAL Sidebar Content Splitter ---
+        self.sidebar_content_splitter.addWidget(self.function_list)
+        self.sidebar_content_splitter.addWidget(self.file_explorer)
+        self.sidebar_content_splitter.setSizes([200, 400]) # Adjust initial sizes if needed
 
-        # --- Main Splitter ---
-        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_splitter.setHandleWidth(1)
-        self.main_splitter.addWidget(self.sidebar_splitter)
-        self.main_splitter.addWidget(self.tab_widget)
-        self.main_splitter.setSizes([200, 800])
-        main_layout.addWidget(self.main_splitter)
+        # ---------- SideBar Container----------
+        # This QWidget will hold the sidebar_content_splitter
+        self.sidebar = QWidget() # This is the main sidebar widget to hide/show
+        self.sidebar.setObjectName("SideBarContainer") # For potential styling
+        side_layout = QVBoxLayout(self.sidebar)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        side_layout.setSpacing(0)
+        side_layout.addWidget(self.sidebar_content_splitter) # Put the vertical splitter inside
 
-        self.create_actions()
-        self.create_menu_bar()
-        self.create_toolbar()
+        # --- Editor/Browser Splitter (Vertical) ---
+        self.editor_browser_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.editor_browser_splitter.setHandleWidth(1) # Keep handle thin
+        self.editor_browser_splitter.addWidget(self.tab_widget) # Editor tabs on top
+        self.editor_browser_splitter.addWidget(self.browser)    # Browser view below
+        self.editor_browser_splitter.setSizes([500, 200]) # Initial height: 500px for editor, 200px for browser
+
+        # --- Main Horizontal Splitter (VS Code Layout) ---
+        self.v_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.v_splitter.setHandleWidth(1) # Thin splitter handle
+        # Note: ActivityBar is a QToolBar, added via addToolBar, not in this splitter
+
+        # Add Sidebar Container and Editor/Browser Area to the horizontal splitter
+        self.v_splitter.addWidget(self.sidebar)                 # Index 0
+        self.v_splitter.addWidget(self.editor_browser_splitter) # Index 1
+
+        # Set stretch factors: editor area (index 1) expands, sidebar (index 0) does not initially
+        self.v_splitter.setStretchFactor(0, 0)
+        self.v_splitter.setStretchFactor(1, 1)
+        self.v_splitter.setSizes([self.sidebar_original_width, 800]) # Initial sizes
+
+        # Set the main horizontal splitter as the central widget's layout item
+        main_layout.addWidget(self.v_splitter)
+
+        # --- Create Actions, Menus (for Zen mode), Toolbar ---
+        self.create_actions()       # Define actions (including zen_action)
+        self.create_menu_bar()    # Keep menu bar logic for now, will be hidden by Zen/QSS
+        self.create_toolbar()     # Setup the top toolbar
+
+        # --- Status Bar ---
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("就绪")
-        # Connect currentChanged signal after UI is fully initialized
-        # to ensure initial state is handled correctly
-        self.tab_widget.currentChanged.connect(self.on_current_tab_changed)
-        # Set initial state for actions based on whether a tab exists
-        self.update_edit_actions_state(self.get_current_editor())
 
+        # --- Make F11 Global Shortcut Work ---
+        self.addAction(self.zen_action) # Add Zen mode action to window
+
+        # --- Connect Signals ---
+        self.tab_widget.currentChanged.connect(self.on_current_tab_changed)
+
+        # --- Set Initial State ---
+        self.update_edit_actions_state(self.get_current_editor())
+        print("▶ initUI 完成") # ★ 添加打印
 
     def create_actions(self):
-        # Action creation remains largely the same, ensure icons are handled
-        # (QIcon.fromTheme might need fallback or direct path if theme icons aren't available)
-        self.new_action = QAction(QIcon.fromTheme("document-new", QIcon("assets/icons/document-new.png")), "新建", self, shortcut="Ctrl+N", triggered=self.new_file) # Added fallback example
-        self.open_action = QAction(QIcon.fromTheme("document-open"), "打开...", self, shortcut="Ctrl+O", triggered=self.open_file_dialog)
-        self.save_action = QAction(QIcon.fromTheme("document-save"), "保存", self, shortcut="Ctrl+S", triggered=self.save_file, enabled=False)
-        self.save_as_action = QAction(QIcon.fromTheme("document-save-as"), "另存为...", self, shortcut="Ctrl+Shift+S", triggered=self.save_file_as, enabled=False)
-        self.close_tab_action = QAction("关闭标签页", self, shortcut="Ctrl+W", triggered=lambda: self.close_tab(self.tab_widget.currentIndex()), enabled=False)
-        self.exit_action = QAction("退出", self, shortcut="Ctrl+Q", triggered=self.close)
+        # Add tooltips to all actions
+        # Remove icon loading attempts to ensure text buttons appear
+        self.new_action = QAction("新建", self, shortcut="Ctrl+N", toolTip="创建新文件 (Ctrl+N)", triggered=self.new_file)
+        self.open_action = QAction("打开...", self, shortcut="Ctrl+O", toolTip="打开现有文件 (Ctrl+O)", triggered=self.open_file_dialog)
+        self.save_action = QAction("保存", self, shortcut="Ctrl+S", toolTip="保存当前文件 (Ctrl+S)", triggered=self.save_file, enabled=False)
+        self.save_as_action = QAction("另存为...", self, shortcut="Ctrl+Shift+S", toolTip="将当前文件另存为... (Ctrl+Shift+S)", triggered=self.save_file_as, enabled=False)
+        self.close_tab_action = QAction("关闭标签页", self, shortcut="Ctrl+W", toolTip="关闭当前标签页 (Ctrl+W)", triggered=lambda: self.close_tab(self.tab_widget.currentIndex()), enabled=False)
+        self.exit_action = QAction("退出", self, shortcut="Ctrl+Q", toolTip="退出应用程序 (Ctrl+Q)", triggered=self.close)
 
-        self.undo_action = QAction(QIcon.fromTheme("edit-undo"), "撤销", self, shortcut="Ctrl+Z", triggered=self.undo_action_handler, enabled=False)
-        self.redo_action = QAction(QIcon.fromTheme("edit-redo"), "重做", self, shortcut="Ctrl+Y", triggered=self.redo_action_handler, enabled=False)
-        self.cut_action = QAction(QIcon.fromTheme("edit-cut"), "剪切", self, shortcut="Ctrl+X", triggered=self.cut_action_handler, enabled=False)
-        self.copy_action = QAction(QIcon.fromTheme("edit-copy"), "复制", self, shortcut="Ctrl+C", triggered=self.copy_action_handler, enabled=False)
-        self.paste_action = QAction(QIcon.fromTheme("edit-paste"), "粘贴", self, shortcut="Ctrl+V", triggered=self.paste_action_handler, enabled=False)
-        self.select_all_action = QAction("全选", self, shortcut="Ctrl+A", triggered=self.select_all_action_handler, enabled=False)
+        self.undo_action = QAction("撤销", self, shortcut="Ctrl+Z", toolTip="撤销上一步操作 (Ctrl+Z)", triggered=self.undo_action_handler, enabled=False)
+        self.redo_action = QAction("重做", self, shortcut="Ctrl+Y", toolTip="重做上一步操作 (Ctrl+Y)", triggered=self.redo_action_handler, enabled=False)
+        self.cut_action = QAction("剪切", self, shortcut="Ctrl+X", toolTip="剪切选中内容 (Ctrl+X)", triggered=self.cut_action_handler, enabled=False)
+        self.copy_action = QAction("复制", self, shortcut="Ctrl+C", toolTip="复制选中内容 (Ctrl+C)", triggered=self.copy_action_handler, enabled=False)
+        self.paste_action = QAction("粘贴", self, shortcut="Ctrl+V", toolTip="粘贴剪贴板内容 (Ctrl+V)", triggered=self.paste_action_handler, enabled=False)
+        self.select_all_action = QAction("全选", self, shortcut="Ctrl+A", toolTip="全选文档内容 (Ctrl+A)", triggered=self.select_all_action_handler, enabled=False)
 
-        self.font_action = QAction("字体...", self, triggered=self.change_font, enabled=False)
-        self.color_action = QAction("颜色...", self, triggered=self.change_color, enabled=False)
-        self.insert_image_action = QAction(QIcon.fromTheme("insert-image"), "插入图片...", self, triggered=self.insert_image, enabled=False)
-        self.find_action = QAction(QIcon.fromTheme("edit-find"), "查找", self, shortcut="Ctrl+F", triggered=self.find_text, enabled=False)
-        self.replace_action = QAction(QIcon.fromTheme("edit-find-replace"), "替换", self, shortcut="Ctrl+H", triggered=self.replace_text, enabled=False)
+        self.font_action = QAction("字体...", self, toolTip="更改字体设置", triggered=self.change_font, enabled=False)
+        self.color_action = QAction("颜色...", self, toolTip="更改文本颜色", triggered=self.change_color, enabled=False)
+        self.insert_image_action = QAction("插入图片...", self, toolTip="在光标处插入图片", triggered=self.insert_image, enabled=False)
+        self.find_action = QAction("查找", self, shortcut="Ctrl+F", toolTip="在当前文件中查找文本 (Ctrl+F)", triggered=self.find_text, enabled=False)
+        self.replace_action = QAction("替换", self, shortcut="Ctrl+H", toolTip="在当前文件中查找并替换文本 (Ctrl+H)", triggered=self.replace_text, enabled=False)
 
-        self.toggle_theme_action = QAction("切换主题", self, shortcut="Ctrl+T", triggered=self.toggle_theme)
-        self.about_action = QAction("关于", self, triggered=self.show_about)
+        self.toggle_theme_action = QAction("切换主题", self, shortcut="Ctrl+T", toolTip="切换亮色/暗色主题 (Ctrl+T)", triggered=self.toggle_theme)
+        self.about_action = QAction("关于", self, toolTip="显示关于信息", triggered=self.show_about)
+
+        # --- Zen Mode Action ---
+        self.zen_action = QAction("Zen Mode", self, checkable=True,
+                                  shortcut="F11", triggered=self.toggle_zen_mode,
+                                  toolTip="进入/退出 Zen 模式 (F11)")
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -167,17 +239,72 @@ class MainWindow(QMainWindow):
         format_menu.addSeparator()
         format_menu.addAction(self.toggle_theme_action)
 
+        # --- Add Zen Mode to View Menu (Optional) ---
+        view_menu = menu_bar.addMenu("视图")
+        view_menu.addAction(self.zen_action)
+
         help_menu = menu_bar.addMenu("帮助")
         help_menu.addAction(self.about_action)
 
+        # Hide the menu bar by default if using the toolbar button approach
+        # menu_bar.setVisible(False) # Or control visibility in Zen Mode / QSS
+
     def create_toolbar(self):
+        # Keep only high-frequency actions
+        self.toolbar.setMovable(False)          # Prevent dragging into multiple rows
+        self.toolbar.setIconSize(QSize(20, 20)) # Set desired icon size
+
+        # --- Main Action Buttons ---
         self.toolbar.addActions([self.new_action, self.open_action, self.save_action])
         self.toolbar.addSeparator()
         self.toolbar.addActions([self.undo_action, self.redo_action])
         self.toolbar.addSeparator()
-        self.toolbar.addActions([self.cut_action, self.copy_action, self.paste_action])
-        self.toolbar.addSeparator()
-        self.toolbar.addActions([self.find_action, self.replace_action]) # Added find/replace
+        self.toolbar.addAction(self.find_action)
+
+        # --- Spacer to push menu button to the right ---
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.toolbar.addWidget(spacer)
+
+        # --- Menu Dropdown Button ---
+        menu_btn = QToolButton()
+        # Use fallback text directly
+        menu_btn.setText("...") # Fallback text
+        menu_btn.setToolTip("更多选项")
+
+        menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup) # Show menu immediately on click
+        more_menu = QMenu(menu_btn)
+
+        # Add actions previously in the menu bar
+        file_submenu = more_menu.addMenu("文件") # Group file actions
+        file_submenu.addActions([self.save_as_action, self.close_tab_action])
+        file_submenu.addSeparator()
+        file_submenu.addAction(self.exit_action)
+
+        edit_submenu = more_menu.addMenu("编辑") # Group edit actions
+        edit_submenu.addActions([self.cut_action, self.copy_action,
+                                 self.paste_action, self.select_all_action])
+        edit_submenu.addSeparator()
+        edit_submenu.addAction(self.replace_action) # Add replace back here
+
+        format_submenu = more_menu.addMenu("格式") # Group format actions
+        format_submenu.addActions([self.font_action, self.color_action,
+                                   self.insert_image_action])
+
+        view_submenu = more_menu.addMenu("视图") # Group view actions
+        view_submenu.addAction(self.toggle_theme_action)
+        view_submenu.addSeparator()
+        view_submenu.addAction(self.zen_action) # Add Zen mode toggle here too
+
+        help_submenu = more_menu.addMenu("帮助") # Group help actions
+        help_submenu.addAction(self.about_action)
+
+        menu_btn.setMenu(more_menu)
+        self.toolbar.addWidget(menu_btn)
+
+        # --- Hide the original Menu Bar ---
+        # Keep menuBar object for Zen mode toggle, but hide it visually
+        self.menuBar().setVisible(False)
 
     def get_current_editor(self) -> TextEditWithLineNumbers | None:
         # Ensure we return the correct type or None
@@ -185,12 +312,21 @@ class MainWindow(QMainWindow):
         return widget if isinstance(widget, TextEditWithLineNumbers) else None
 
     def on_current_tab_changed(self, index):
-        # This function remains mostly the same
-        editor = self.get_current_editor()
-        self.update_edit_actions_state(editor)
-        self.update_window_title()
-        # Ensure signal emits the correct type or None
-        self.current_editor_changed.emit(editor if editor else None)
+         # This function remains mostly the same
+         editor = self.get_current_editor()
+         self.update_edit_actions_state(editor)
+         self.update_window_title() # Corrected indentation
+         # Ensure signal emits the correct type or None
+         self.current_editor_changed.emit(editor if editor else None)
+
+         # --- Collapse/Expand global browser based on tab type ---
+         w = self.tab_widget.widget(index)
+         if isinstance(w, NoteDownloaderWidget):
+             self._collapse_global_browser()
+         else:
+             # Only restore if the browser is actually collapsed
+             if len(self.editor_browser_splitter.sizes()) == 2 and self.editor_browser_splitter.sizes()[1] == 0:
+                self._restore_global_browser()
 
     def _update_copy_cut_state(self, available: bool):
         # This helper function remains the same
@@ -236,7 +372,6 @@ class MainWindow(QMainWindow):
         self.find_action.setEnabled(has_editor)
         self.replace_action.setEnabled(has_editor)
 
-
         # Connect signals for the current editor safely
         if has_editor:
             try: editor.document().undoAvailable.connect(self.undo_action.setEnabled)
@@ -250,7 +385,6 @@ class MainWindow(QMainWindow):
             self.previous_editor = editor
         else:
             self.previous_editor = None
-
 
     def update_window_title(self):
         # This function remains mostly the same
@@ -279,7 +413,6 @@ class MainWindow(QMainWindow):
          self.tab_widget.setTabText(index, new_tab_text)
          self.update_window_title() # Update window title as well
 
-
     # --- Action Handlers ---
     def undo_action_handler(self):
         if editor := self.get_current_editor(): editor.undo()
@@ -294,95 +427,89 @@ class MainWindow(QMainWindow):
     def select_all_action_handler(self):
         if editor := self.get_current_editor(): editor.selectAll()
 
-    # --- Sidebar Click Handler ---
+    # --- Sidebar Click Handler (Corrected Logic Again) ---
     def sidebar_item_clicked(self, item):
-        # Use the imported TimerWindow class
-        if item.text() == "计时器":
-            # Check if window already exists
-            if not hasattr(self, 'timer_window') or not self.timer_window.isVisible():
-                 self.timer_window = TimerWindow(self) # Use imported class
-                 self.timer_window.show()
+        item_text = item.text()
+        is_combined_tool = item_text in ("计时器", "便签与待办", "日历")
+        combined_dock_key = "CombinedTools"
+        # 确定要查找或存储的 dock 的 key
+        dock_key = combined_dock_key if is_combined_tool else item_text
+
+        dock = self.tool_docks.get(dock_key) # 尝试获取已存在的 dock
+
+        if dock is None: # 如果 dock 不存在，则创建
+            widget_instance = None
+            dock_title = item_text # 默认标题
+
+            # 根据 item_text 创建对应的 widget 实例
+            if is_combined_tool:
+                widget_instance = CombinedToolsWidget(self)
+                dock_title = "工具箱"
+            elif item_text == "计算器":
+                widget_instance = CalculatorWindow(self)
+            elif item_text == "笔记下载":
+                self.open_note_downloader_tab()
+                return # 笔记下载不创建 dock
+            # Add other non-combined tools here if needed
+
+            # 如果成功创建了 widget 实例，则创建 Dock 并进行处理
+            if widget_instance:
+                # ★ 使用临时变量 new_dock 存储新创建的 dock ★
+                new_dock = QDockWidget(dock_title, self)
+                new_dock.setWidget(widget_instance)
+                new_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea)
+                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, new_dock)
+
+                # --- Attempt to Tabify ---
+                tabified = False
+                # 尝试将新 dock 与该区域已存在的 dock 合并为 Tab
+                for existing in self.findChildren(QDockWidget):
+                    # 确保 existing 不是 new_dock 本身，并且在同一个区域
+                    if existing is not new_dock and self.dockWidgetArea(existing) == self.dockWidgetArea(new_dock):
+                        self.tabifyDockWidget(existing, new_dock)
+                        tabified = True
+                        break
+
+                # ★ 将新创建的 dock 存储到 self.tool_docks 中，并赋值给 dock 变量 ★
+                self.tool_docks[dock_key] = new_dock
+                dock = new_dock # ★ 关键：确保后续操作使用的是新创建的 dock
+
+                # 移除显式隐藏逻辑，让 raise_() 处理显示
+
+            # 如果没有创建 widget 实例，且不是合并工具（即真正的占位符）
+            elif not is_combined_tool:
+                QMessageBox.information(self, "功能占位符", f"'{item_text}' 功能尚未实现。")
+                return # Exit if no widget created
+
+        # --- dock 存在（无论是找到的还是新创建的）---
+        if dock: # 检查 dock 是否有效
+            dock.show() # ★ 添加显式显示 ★
+            dock.raise_() # 提升到顶层并显示
+
+            # 如果是合并工具，切换内部 Tab
+            if is_combined_tool and isinstance(dock.widget(), CombinedToolsWidget):
+                tab_map = {"日历": 0, "便签与待办": 1, "计时器": 2}
+                target_index = tab_map.get(item_text)
+                if target_index is not None:
+                    dock.widget().tabs.setCurrentIndex(target_index)
+
+            # 更新状态栏消息
+            if is_combined_tool:
+                self.statusBar.showMessage(f"已切换到工具箱中的 '{item_text}'")
             else:
-                 self.timer_window.activateWindow()
-            self.statusBar.showMessage(f"已打开 {item.text()} 功能")
-        elif item.text() == "计算器":
-            # 检查计算器窗口是否已经存在
-            if not hasattr(self, 'calculator_window') or not self.calculator_window.isVisible():
-                 self.calculator_window = CalculatorWindow(self) # 使用导入的CalculatorWindow类
-                 self.calculator_window.show()
-            else:
-                 self.calculator_window.activateWindow()
-            self.statusBar.showMessage(f"已打开 {item.text()} 功能")
-        elif item.text() == "日历":
-            # 检查日历窗口是否已经存在
-            if not hasattr(self, 'calendar_window') or not self.calendar_window.isVisible():
-                 self.calendar_window = CalendarWindow(self) # 使用导入的CalendarWindow类
-                 self.calendar_window.show()
-            else:
-                 self.calendar_window.activateWindow()
-            self.statusBar.showMessage(f"已打开 {item.text()} 功能")
-        elif item.text() == "便签":
-            try:
-                # 直接创建一个新便签
-                if not hasattr(self, 'sticky_notes'):
-                    self.sticky_notes = []
-                
-                # 创建新便签
-                sticky_note = StickyNote(parent=self)
-                
-                # 安全连接信号
-                try:
-                    sticky_note.closed.connect(self.on_sticky_note_closed)
-                except Exception:
-                    pass
-                    
-                # 显示便签
-                sticky_note.show()
-                
-                # 添加到便签列表
-                self.sticky_notes.append(sticky_note)
-                
-                self.statusBar.showMessage(f"已创建新便签")
-            except Exception as e:
-                print(f"创建便签时出错: {str(e)}")
-                self.statusBar.showMessage(f"创建便签失败")
-        elif item.text() == "待办事项":
-            # 检查待办事项窗口是否已经存在
-            if not hasattr(self, 'todo_window') or not self.todo_window.isVisible():
-                 try:
-                     # 尝试创建data目录（如果不存在）
-                     os.makedirs("data", exist_ok=True)
-                     
-                     # 确保todo.json文件存在且格式正确
-                     todo_path = os.path.join("data", "todo.json")
-                     if not os.path.exists(todo_path):
-                         # 创建一个空的todo.json文件
-                         with open(todo_path, "w", encoding="utf-8") as f:
-                             json.dump([], f)
-                         print(f"创建了新的待办事项文件: {todo_path}")
-                         
-                     self.todo_window = TodoWidget(self)
-                     self.todo_window.show()
-                     self.statusBar.showMessage(f"已打开 {item.text()} 功能")
-                 except Exception as e:
-                     print(f"打开待办事项窗口出错: {str(e)}")
-                     import traceback
-                     traceback.print_exc()
-                     # 显示更具体的错误消息
-                     QMessageBox.critical(self, "错误", f"无法打开待办事项功能:\n{str(e)}")
-                     self.statusBar.showMessage(f"打开待办事项失败")
-            else:
-                 self.todo_window.activateWindow()
-                 self.statusBar.showMessage(f"已打开 {item.text()} 功能")
-        else:
-            self.statusBar.showMessage(f"'{item.text()}' 是功能占位符，尚未实现实际功能")
-            QMessageBox.information(self, "功能占位符", f"'{item.text()}' 功能尚未实现。")
+                self.statusBar.showMessage(f"已打开 {item_text} 功能")
+        # else: # Debugging check
+        #     print(f"ERROR: Dock is still None for item '{item_text}' after creation attempt!")
+
 
     # --- File Operations ---
     def new_file(self):
-        # Use the imported TextEditWithLineNumbers
+        # Use the imported TextEditWithLineNumbers (now based on QPlainTextEdit)
         editor = TextEditWithLineNumbers()
-        editor.setFontPointSize(12)
+        # Set font size for QPlainTextEdit
+        font = editor.font()
+        font.setPointSize(12)
+        editor.setFont(font)
         self.untitled_counter += 1
         tab_name = f"未命名-{self.untitled_counter}"
         editor.setProperty("untitled_name", tab_name)
@@ -398,7 +525,6 @@ class MainWindow(QMainWindow):
         self.statusBar.showMessage("新建文件")
         # Update actions state for the new editor
         self.update_edit_actions_state(editor)
-
 
     def open_file_dialog(self):
          # This function remains mostly the same
@@ -459,7 +585,6 @@ class MainWindow(QMainWindow):
                  self.tab_widget.removeTab(index)
                  editor.deleteLater()
 
-
     def save_file(self) -> bool:
         # This function remains mostly the same
         editor = self.get_current_editor()
@@ -502,7 +627,6 @@ class MainWindow(QMainWindow):
              default_filter = "文本文件 (*.txt)"
         elif is_plain and not current_path: # New file that looks like plain text
              default_filter = "文本文件 (*.txt)"
-
 
         file_name, selected_filter = QFileDialog.getSaveFileName(
             self, "另存为", os.path.join(default_dir, suggested_name),
@@ -594,6 +718,108 @@ class MainWindow(QMainWindow):
              else: # No editor left after close? Should not happen if new_file is called
                  self.update_edit_actions_state(None)
 
+    # --- New Sidebar Toggle Method ---
+    def toggle_sidebar(self, force_hide=None):
+        """Toggles the visibility of the sidebar using splitter sizes.
+           None=toggle, True=hide, False=show"""
+        sizes = self.v_splitter.sizes() # [sidebar_width, editor_width]
+        # Activity bar width (48) is not part of the splitter sizes
+
+        if force_hide is None:
+            force_hide = sizes[0] > 0 # Considered visible if width > 0
+
+        if force_hide:
+            # Hide sidebar
+            if sizes[0] > 0: # Store width only if it was visible
+                 self._saved_sidebar_width = sizes[0]
+            # Set sidebar width to 0, give its space to the editor
+            self.v_splitter.setSizes([0, sizes[1] + self._saved_sidebar_width])
+        else:
+            # Show sidebar
+            # Restore saved width or default, ensure minimum width
+            w = max(getattr(self, "_saved_sidebar_width", self.sidebar_original_width), 150)
+            # Calculate new editor width, ensuring it's not negative
+            new_editor_width = max(150, sizes[1] - w)
+            self.v_splitter.setSizes([w, new_editor_width])
+
+    # --- New Zen Mode Toggle Method ---
+    def toggle_zen_mode(self, zen: bool):
+        """Enters or exits Zen mode."""
+        # Widgets to hide/show
+        widgets_to_hide = [self.activity_bar, self.sidebar, self.toolbar, self.statusBar(), self.menuBar()]
+
+        if zen:
+            # --- Enter Zen Mode ---
+            # Save current splitter sizes BEFORE hiding widgets
+            self._pre_zen_sizes = self.v_splitter.sizes()
+
+            # Hide UI elements
+            for w in widgets_to_hide:
+                w.setVisible(False)
+
+            # Make editor take full space (set sidebar width to 0 in splitter)
+            # Note: v_splitter only contains [sidebar, editor_browser_splitter]
+            self.v_splitter.setSizes([0, 1]) # Give all space to editor area (index 1)
+
+            # Optional: Go Fullscreen
+            # self.showFullScreen()
+
+        else:
+            # --- Exit Zen Mode ---
+            # Restore splitter sizes if available, otherwise use defaults
+            if self._pre_zen_sizes:
+                 # Ensure restored sizes are valid (e.g., handle case where sidebar was hidden before Zen)
+                 if self._pre_zen_sizes[0] == 0 and self.sidebar.isVisible(): # If sidebar was hidden but should be visible now
+                      restore_sidebar_width = getattr(self, "_saved_sidebar_width", self.sidebar_original_width)
+                      restore_editor_width = max(150, self._pre_zen_sizes[1] - restore_sidebar_width)
+                      self.v_splitter.setSizes([restore_sidebar_width, restore_editor_width])
+                 else:
+                      self.v_splitter.setSizes(self._pre_zen_sizes)
+            else:
+                 # Fallback default sizes
+                 self.v_splitter.setSizes([self.sidebar_original_width, 800])
+
+            # Show UI elements
+            for w in widgets_to_hide:
+                 # Special case: Don't show menuBar if it was originally hidden by toolbar logic
+                 if w == self.menuBar() and not w.isVisible():
+                      continue # Keep it hidden if it should be
+                 w.setVisible(True)
+
+            # Optional: Exit Fullscreen
+            # self.showNormal()
+
+        # Ensure the action's checked state reflects the mode
+        self.zen_action.setChecked(zen)
+
+    # --- Helper methods for managing global browser visibility ---
+    def _collapse_global_browser(self):
+        """隐藏全局 browser，让上部编辑区占满整个垂直空间"""
+        self.browser.setVisible(False)
+        sizes = self.editor_browser_splitter.sizes()
+        if len(sizes) == 2 and sizes[1] > 0: # Only collapse if browser has size
+            total = sum(sizes)
+            self.editor_browser_splitter.setSizes([total, 0])
+
+    def _restore_global_browser(self):
+        """恢复浏览器视图（非笔记下载标签被选中时调用）"""
+        self.browser.setVisible(True)
+        # Restore a reasonable ratio, ensuring total size isn't drastically changed
+        # Get current sizes first to maintain total height if possible
+        current_sizes = self.editor_browser_splitter.sizes()
+        if len(current_sizes) == 2:
+            total = sum(current_sizes)
+            # Restore to a fixed ratio like 500/200 or calculate based on total
+            restore_top = max(100, total - 200) # Ensure top has at least 100px
+            restore_bottom = total - restore_top
+            # Check if browser was actually collapsed before restoring fixed sizes
+            if current_sizes[1] == 0:
+                 self.editor_browser_splitter.setSizes([restore_top, restore_bottom])
+            # If browser wasn't collapsed (e.g., user dragged), keep current sizes? Or force restore?
+            # For simplicity, let's force restore the ratio if it's not already collapsed.
+            # You might want different logic here based on desired behavior.
+            # Let's assume we only need to restore *if* it was collapsed.
+            # If current_sizes[1] > 0, do nothing, user might have resized manually.
 
     def maybe_save_all(self) -> bool:
          # This function remains mostly the same
@@ -628,7 +854,6 @@ class MainWindow(QMainWindow):
              self.tab_widget.setCurrentIndex(new_index)
          return True # Exit approved
 
-
     # --- PDF Handling ---
     def open_pdf_preview(self, pdf_path):
         # Use the imported PDFViewer
@@ -638,7 +863,6 @@ class MainWindow(QMainWindow):
             pdf_viewer.exec() # Show as modal dialog
         except Exception as e:
              QMessageBox.critical(self, "错误", f"无法打开PDF预览: {str(e)}")
-
 
     def convert_pdf_to_html(self, pdf_path):
         # Use imported pdf_utils functions
@@ -666,7 +890,6 @@ class MainWindow(QMainWindow):
                 self.update_edit_actions_state(editor) # Update actions
         except Exception as e:
             QMessageBox.critical(self, "错误", f"无法转换PDF文件: {str(e)}")
-
 
     # --- Formatting ---
     def change_font(self):
@@ -717,7 +940,6 @@ class MainWindow(QMainWindow):
          else:
              QMessageBox.warning(self, "插入图片", "没有活动的编辑窗口！")
 
-
     # --- Find and Replace ---
     def find_text(self):
         if editor := self.get_current_editor():
@@ -736,7 +958,6 @@ class MainWindow(QMainWindow):
                           editor.ensureCursorVisible()
                  else:
                       editor.ensureCursorVisible()
-
 
     def replace_text(self):
         if editor := self.get_current_editor():
@@ -788,42 +1009,69 @@ class MainWindow(QMainWindow):
                     # Update actions state after potential modification
                     self.update_edit_actions_state(editor)
 
-
     # --- Help and Theme ---
     def show_about(self):
         # Consider moving this to a separate dialog class (e.g., src/ui/dialogs/about_dialog.py)
         QMessageBox.about(self, "关于多功能记事本",
-                         "多功能记事本 v1.3 (重构版)\n\n一个基于PyQt6的记事本应用，支持多文件编辑、HTML、PDF预览/转换、图片插入、主题切换等。")
+                          "多功能记事本 v1.4 (持续改进中)\n\n一个基于PyQt6的记事本应用，支持多文件编辑、HTML、PDF预览/转换、图片插入、主题切换等。")
 
     def apply_current_theme(self):
-        # Use the imported ThemeManager
+        """调用 ThemeManager 并刷新所有子组件的调色板 / QSS。"""
         try:
             app = QApplication.instance()
             if not app: return # Safety check
 
-            # Apply theme using the manager
+            # 1. Apply base QSS from ThemeManager
             self.theme_manager.apply_theme(app)
 
-            # Update components that need explicit theme refresh
-            if hasattr(self, 'file_explorer') and self.file_explorer:
-                 self.file_explorer.update_theme(self.theme_manager.get_current_theme())
+            # 2. Determine if dark theme is active (Corrected logic)
+            is_dark = self.theme_manager.get_current_theme() == ThemeManager.DARK_THEME # ★ 修正：使用 get_current_theme() 比较
 
-            # Refresh editor views (line numbers, background)
+            # 3. Refresh editor colors explicitly
             for i in range(self.tab_widget.count()):
                  widget = self.tab_widget.widget(i)
                  if isinstance(widget, TextEditWithLineNumbers):
-                     # Trigger updates - these might need specific methods if `update()` isn't enough
-                     widget.update_line_number_area_width() # Recalculate width based on font
-                     widget.update_line_number_area()      # Repaint line numbers
-                     widget.viewport().update()            # Repaint editor background/text
+                     widget.update_highlight_colors(is_dark) # Call the new method in editor
+                     # No need for separate viewport updates if update_highlight_colors handles it
 
-            theme_name = "浅色" if self.theme_manager.get_current_theme() == ThemeManager.LIGHT_THEME else "深色"
-            self.statusBar.showMessage(f"已应用{theme_name}主题", 3000)
+            # 4. Refresh File Explorer theme if exists
+            if hasattr(self, 'file_explorer') and self.file_explorer:
+                 self.file_explorer.update_theme(self.theme_manager.get_current_theme()) # Assuming FileExplorer has this method
+
+            # 5. Apply global scrollbar styles dynamically - This might be better handled entirely in QSS
+            # Combine base style with scrollbar style to avoid overriding everything
+            base_stylesheet = app.styleSheet() # Get the currently applied base style
+            # Scrollbar styles are now primarily defined in the main QSS file
+            # Append scrollbar style to existing stylesheet
+            # app.setStyleSheet(base_stylesheet + "\n" + scrollbar_style) # Let QSS handle this
+
+            # Update status bar message
+            theme_name = "深色" if is_dark else "浅色"
+            self.statusBar.showMessage(f"已切换至 {theme_name} 主题", 3000)
+
+            # Update Activity Bar Style based on theme (Corrected indentation)
+            activity_bg = "#333333" if is_dark else "#F3F3F3" # Example light theme color
+            activity_hover = "#444444" if is_dark else "#E0E0E0"
+            activity_pressed = "#555555" if is_dark else "#D0D0D0" # Added pressed color
+            # Create stylesheet string separately to avoid f-string indentation issues
+            activity_bar_style = f"""
+                QToolBar {{ background: {activity_bg}; border: 0; }}
+                QToolButton {{
+                    width: 48px;
+                    padding: 10px 0; /* Adjust padding */
+                    color: {'#FFFFFF' if is_dark else '#000000'}; /* Text color */
+                    border: none; /* Ensure no border */
+                }}
+                QToolButton:hover {{ background: {activity_hover}; }}
+                QToolButton:pressed {{ background: {activity_pressed}; }} /* Added pressed style */
+            """
+            self.activity_bar.setStyleSheet(activity_bar_style.strip()) # Apply the created string
+
         except Exception as e:
             print(f"应用主题时出错: {str(e)}")
             # Consider showing a user-friendly error message
             # QMessageBox.warning(self, "主题错误", f"应用主题时出错:\n{str(e)}")
-
+        print("▶ 主题应用完成") # ★ 添加打印
 
     def toggle_theme(self):
         # This function remains the same, relies on ThemeManager
@@ -834,162 +1082,44 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         # This function remains mostly the same
         if self.maybe_save_all(): # Check if user wants to save changes
-            try:
-                # Cleanup temporary PDF directories before closing
-                for i in range(self.tab_widget.count()):
-                    widget = self.tab_widget.widget(i)
-                    if isinstance(widget, TextEditWithLineNumbers):
-                        if temp_dir := widget.property("pdf_temp_dir"):
-                            cleanup_temp_images(temp_dir) # Use imported function
-                            
-                # 保存并关闭所有打开的便签
-                try:
-                    if hasattr(self, 'sticky_notes'):
-                        # 保存所有便签数据
-                        self.save_sticky_notes()
-                        
-                        # 然后关闭所有便签（使用副本防止迭代错误）
-                        notes_to_close = list(self.sticky_notes)
-                        for note in notes_to_close:
-                            if note.isVisible():
-                                # 断开信号连接，防止循环
-                                try:
-                                    note.closed.disconnect(self.on_sticky_note_closed)
-                                except:
-                                    pass
-                                note.close()
-                except Exception as e:
-                    print(f"关闭便签时出错: {str(e)}")
-                    
-                # 关闭待办事项窗口
-                try:
-                    if hasattr(self, 'todo_window') and self.todo_window and self.todo_window.isVisible():
-                        self.todo_window.close()
-                except Exception as e:
-                    print(f"关闭待办事项窗口时出错: {str(e)}")
-                    
-                # 关闭其他功能窗口
-                for window_name in ['timer_window', 'calculator_window', 'calendar_window']:
-                    try:
-                        if hasattr(self, window_name):
-                            window = getattr(self, window_name)
-                            if window and window.isVisible():
-                                window.close()
-                    except Exception as e:
-                        print(f"关闭 {window_name} 时出错: {str(e)}")
-                            
-                event.accept() # Allow closing
-            except Exception as e:
-                print(f"关闭应用程序时出错: {str(e)}")
-                event.accept()  # 确保应用程序可以关闭
+            # Cleanup temporary PDF directories before closing
+            for i in range(self.tab_widget.count()):
+                widget = self.tab_widget.widget(i)
+                if isinstance(widget, TextEditWithLineNumbers):
+                    if temp_dir := widget.property("pdf_temp_dir"):
+                        cleanup_temp_images(temp_dir) # Use imported function
+            event.accept() # Allow closing
         else:
             event.ignore() # Prevent closing
-            
-    # 处理便签关闭事件
-    def on_sticky_note_closed(self, note_id):
-        """处理便签关闭事件"""
-        try:
-            # 从便签列表中移除已关闭的便签
-            if not hasattr(self, 'sticky_notes'):
+
+    # --- Note Downloader Tab Method ---
+    def open_note_downloader_tab(self):
+        # Check if tab already exists
+        for i in range(self.tab_widget.count()):
+            if self.tab_widget.tabText(i) == "笔记下载":
+                self.tab_widget.setCurrentIndex(i)
                 return
-                
-            # 找到要移除的便签
-            note_to_remove = None
-            for note in self.sticky_notes:
-                if hasattr(note, 'note_id') and note.note_id == note_id:
-                    note_to_remove = note
-                    break
-                    
-            # 如果找到了，从列表中移除
-            if note_to_remove in self.sticky_notes:
-                self.sticky_notes.remove(note_to_remove)
-                
-        except Exception as e:
-            print(f"处理便签关闭事件出错: {str(e)}")
-            
-    # 加载便签数据
-    def load_sticky_notes(self):
-        try:
-            # 确保初始化便签列表
-            if not hasattr(self, 'sticky_notes'):
-                self.sticky_notes = []
-                
-            notes_file = os.path.join("data", "notes.json")
-            if not os.path.exists(notes_file):
-                return
-                
-            with open(notes_file, "r", encoding="utf-8") as f:
-                notes_data = json.load(f)
-                
-            # 创建便签
-            for note_data in notes_data:
-                try:
-                    if not note_data or not isinstance(note_data, dict):
-                        continue
-                        
-                    # 检查必要的字段是否存在
-                    if "id" not in note_data:
-                        continue
-                        
-                    sticky_note = StickyNote(
-                        note_id=note_data.get("id"),
-                        content=note_data.get("content", ""),
-                        color=note_data.get("color", "#ffff99"),
-                        geometry=note_data.get("geometry"),
-                        parent=self
-                    )
-                    
-                    # 安全地连接信号
-                    try:
-                        sticky_note.closed.connect(self.on_sticky_note_closed)
-                    except Exception:
-                        pass
-                        
-                    self.sticky_notes.append(sticky_note)
-                except Exception as e:
-                    print(f"创建便签时出错: {str(e)}")
-                    continue
-                    
-            return True
-        except Exception as e:
-            print(f"加载便签失败: {str(e)}")
-            # 不向用户显示错误消息，避免干扰用户体验
-            # QMessageBox.warning(self, "加载便签失败", f"无法加载便签: {str(e)}")
-            return False
-    
-    # 保存便签数据
-    def save_sticky_notes(self):
-        try:
-            notes_data = []
-            
-            # 收集所有便签数据
-            if hasattr(self, 'sticky_notes') and self.sticky_notes:
-                for note in list(self.sticky_notes):
-                    try:
-                        if note and note.isVisible():  # 确保便签有效且可见
-                            notes_data.append(note.get_data())
-                    except Exception as e:
-                        print(f"获取便签数据时出错: {str(e)}")
-                        continue
-            
-            # 确保目录存在
-            os.makedirs("data", exist_ok=True)
-            
-            # 写入文件
-            with open(os.path.join("data", "notes.json"), "w", encoding="utf-8") as f:
-                json.dump(notes_data, f, indent=2, ensure_ascii=False)
-                
-            return True
-        except Exception as e:
-            print(f"保存便签失败: {str(e)}")
-            # 不向用户显示错误消息，避免干扰用户体验
-            # QMessageBox.warning(self, "保存便签失败", f"无法保存便签: {str(e)}")
-            return False
+
+        # Calculate project root relative to this file's location
+        # main_window.py is in src/ui/, so go up three levels to project root
+        project_root = Path(__file__).resolve().parent.parent.parent / "note_downloader"
+
+        # Check if the directory exists
+        if not project_root.is_dir():
+            QMessageBox.critical(self, "错误", f"Note Downloader 目录未找到:\n{project_root}")
+            self.statusBar.showMessage("错误：Note Downloader 目录未找到")
+            return # Corrected indentation
+
+        widget = NoteDownloaderWidget(str(project_root), self) # Corrected indentation
+        index = self.tab_widget.addTab(widget, "笔记下载")      # Corrected indentation
+        self.tab_widget.setCurrentWidget(widget)             # Corrected indentation
+        self.statusBar.showMessage("已打开笔记下载器")           # Corrected indentation
+        self._collapse_global_browser()   # Immediately collapse global browser (Corrected indentation)
+
 
 # Notes for further refactoring (optional):
 # - Consider moving Action/Menu/Toolbar creation into separate methods or classes.
 # - File operations (new, open, save, save_as) could potentially move to a dedicated service class (e.g., FileService).
 # - Error handling could be centralized or improved.
 # - Signal connections could be managed more systematically.
-# Need QDateTime for unique image resource names
-from PyQt6.QtCore import QDateTime
+# QDateTime import moved near other QtCore imports

@@ -42,17 +42,18 @@ class ThemeManager:
             stylesheet = self.load_light_theme()
         else:
             stylesheet = self.load_dark_theme()
-        
+        # Apply the loaded stylesheet
         app.setStyleSheet(stylesheet)
-    
+
     def load_light_theme(self):
-        """加载白色主题样式表"""
-        return self._load_stylesheet("style.qss")
-    
+        """加载浅色主题样式表"""
+        # Point to the new light theme file
+        return self._load_stylesheet("style_light.qss")
+
     def load_dark_theme(self):
-        """加载黑色主题样式表"""
+        """加载深色主题样式表"""
         return self._load_stylesheet("style_dark.qss")
-    
+
     def _load_stylesheet(self, filename):
         """加载样式表文件"""
         # Corrected path calculation: Go up two directories from src/utils to project root, then into assets
