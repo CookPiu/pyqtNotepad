@@ -1,0 +1,60 @@
+/* assets/style_light.qss  ─── VS Code Light 扁平化 1 px 风格 */
+
+/* == 全局 == */
+*               { border-radius:0; font-family:"Consolas","微软雅黑"; }
+QWidget         { background:#FFFFFF; color:#000000; }
+QPlainTextEdit, QLineEdit, QTextEdit { background:#FFFFFF; }   /* 保证编辑区纯白 */
+
+/* == 分割线 == */
+QSplitter::handle         { background:#E5E5E5; width:1px; }
+QSplitter::handle:hover   { background:#C8C8C8; }
+
+/* == Tab == */
+QTabWidget::pane          { border:0; }
+QTabBar::tab              { background:#F3F3F3; padding:6px 12px; margin-right:1px;
+                             border-top:2px solid transparent; }
+QTabBar::tab:selected     { background:#FFFFFF; border-top:2px solid #007ACC; color:#000; }
+QTabBar::close-button     { /* image:url(:/icons/close.svg); */ qproperty-text: "✕"; padding: 1px; } /* Use text 'x' */
+
+/* == 滚动条 == */
+QScrollBar:vertical,QScrollBar:horizontal
+                         { background:transparent; width:8px; height:8px; margin:0; }
+QScrollBar::handle       { background:#BFBFBF; border:none; }
+
+/* == 左侧 ActivityBar == */
+QToolBar[orientation="vertical"]
+                         { background:#F3F3F3; border:0; }
+QToolBar[orientation="vertical"] QToolButton
+                         { width:48px; padding:12px 0; border:none; background:transparent; }
+QToolBar[orientation="vertical"] QToolButton:hover
+                         { background:#E0E0E0; }
+QToolBar[orientation="vertical"] QToolButton:checked /* Style for selected/active tool */
+                         { background:#E0E0E0; border-left: 2px solid #007ACC; } /* VSCode style indicator */
+
+
+/* == SideBar（文件树 / 功能列表）== */
+QListWidget,QTreeView    { border:none; background:#FFFFFF; }
+QTreeView::branch        { border-image:none; }
+QListWidget::item:selected,
+QTreeView::item:selected { background:#CBE8FF; }
+
+/* == 工具栏 == */
+QToolBar                 { background:#FFFFFF; border-bottom:1px solid #E5E5E5; }
+QToolBar QToolButton     { border:none; background:transparent; padding:6px 12px; }
+QToolBar QToolButton:hover
+                         { background:#F3F3F3; }
+
+/* == PushButton / LineEdit == */
+QPushButton,QLineEdit    { background:#F9F9F9; color:#000;
+                           border:1px solid #E5E5E5; padding:4px 8px; }
+QPushButton:hover        { background:#EFEFEF; }
+QPushButton:pressed      { background:#CBE8FF; }
+
+/* == 右键菜单 == */
+QMenu                    { background:#F3F3F3; color:#000; border:1px solid #C8C8C8; }
+QMenu::item              { padding:4px 20px; }
+QMenu::item:selected     { background:#CBE8FF; color:#000; }
+QMenu::separator         { height:1px; background:#C8C8C8; margin:4px 0; }
+
+/* == StatusBar == */
+QStatusBar               { background:#007ACC; color:#FFF; border:none; }

@@ -1,0 +1,13 @@
+base_url: "https://moodle.must.edu.mo"
+login_path: "/login/index.php"
+
+credentials:
+  username: "你的用户名"
+  password: "你的密码"
+
+categories:
+  LecturePPT: ["Lecture", ".ppt", ".pptx"]
+  Assignment:  ["Assignment"]
+  Syllabus:    ["Syllabus"]
+  Reports:     ["Report", "Outline"]
+  Others:      []

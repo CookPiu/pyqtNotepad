@@ -27,24 +27,6 @@ class FileExplorer(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # 创建按钮布局
-        button_layout = QHBoxLayout()
-        button_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 添加按钮：打开文件夹、新建文件夹
-        self.open_folder_btn = QPushButton("打开文件夹")
-        self.open_folder_btn.setMaximumWidth(100)
-        self.open_folder_btn.setObjectName("explorer_btn")
-        self.open_folder_btn.clicked.connect(self.open_folder_dialog)
-        
-        self.new_folder_btn = QPushButton("新建文件夹")
-        self.new_folder_btn.setMaximumWidth(100)
-        self.new_folder_btn.setObjectName("explorer_btn")
-        self.new_folder_btn.clicked.connect(self.create_new_folder)
-        
-        button_layout.addWidget(self.open_folder_btn)
-        button_layout.addWidget(self.new_folder_btn)
-        
         # 创建文件系统模型
         self.model = QFileSystemModel()
         self.model.setRootPath(self.current_path)
@@ -67,7 +49,6 @@ class FileExplorer(QWidget):
         self.tree_view.doubleClicked.connect(self.on_item_double_clicked)
         
         # 添加组件到布局
-        layout.addLayout(button_layout)
         layout.addWidget(self.tree_view)
         
         self.setLayout(layout)
