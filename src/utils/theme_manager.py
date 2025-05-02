@@ -67,3 +67,14 @@ class ThemeManager:
             qss_file.close()
             return stylesheet
         return ""
+        
+    def get_current_style_sheet(self):
+        """获取当前主题的样式表"""
+        if self.current_theme == self.LIGHT_THEME:
+            return self.load_light_theme()
+        else:
+            return self.load_dark_theme()
+            
+    def is_dark_theme(self):
+        """检查当前主题是否为深色主题"""
+        return self.current_theme == self.DARK_THEME
