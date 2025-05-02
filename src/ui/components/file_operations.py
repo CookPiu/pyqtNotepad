@@ -2,6 +2,7 @@ import os
 from PyQt6.QtWidgets import (QFileDialog, QMessageBox, QApplication)
 from PyQt6.QtCore import QSignalBlocker
 from src.ui.editor import TextEditWithLineNumbers
+from src.ui.html_editor import HtmlEditor
 from src.utils.pdf_utils import cleanup_temp_images
 
 class FileOperations:
@@ -10,14 +11,26 @@ class FileOperations:
     def __init__(self, main_window):
         self.main_window = main_window
     
-    def new_file(self):
-        """创建新文件"""
-        # 使用导入的TextEditWithLineNumbers（现在基于QPlainTextEdit）
-        editor = TextEditWithLineNumbers()
-        # 为QPlainTextEdit设置字体大小
-        font = editor.font()
-        font.setPointSize(12)
-        editor.setFont(font)
+    def new_file(self, file_type="text"):
+        """创建新文件
+        
+        Args:
+            file_type: 文件类型，可以是"text"或"html"
+        """
+        # 根据文件类型选择编辑器组件
+        if file_type == "html":
+            editor = HtmlEditor()
+            editor.setFontPointSize(12)  # HtmlEditor有自己的setFontPointSize方法
+            # 连接修改信号
+            editor.document_modified.connect(lambda modified: self.main_window.update_tab_title(modified))
+        else:
+            # 使用导入的TextEditWithLineNumbers（现在基于QPlainTextEdit）
+            editor = TextEditWithLineNumbers()
+            # 为QPlainTextEdit设置字体大小
+            font = editor.font()
+            font.setPointSize(12)
+            editor.setFont(font)
+            
         self.main_window.untitled_counter += 1
         tab_name = f"未命名-{self.main_window.untitled_counter}"
         editor.setProperty("untitled_name", tab_name)
@@ -53,7 +66,10 @@ class FileOperations:
 
         # 使用导入的TextEditWithLineNumbers
         editor = TextEditWithLineNumbers()
-        editor.setFontPointSize(12)
+        # 为QPlainTextEdit设置字体大小
+        font = editor.font()
+        font.setPointSize(12)
+        editor.setFont(font)
         try:
             _, ext = os.path.splitext(file_path)
             file_base_name = os.path.basename(file_path)
@@ -63,9 +79,16 @@ class FileOperations:
                 # PDF预览是模态的或处理自己的生命周期，不要在这里添加编辑器标签
                 return
             elif ext.lower() == '.html':
-                # 使用QSignalBlocker防止过早的修改信号
-                with open(abs_file_path, 'r', encoding='utf-8') as f: content = f.read()
-                with QSignalBlocker(editor.document()): editor.setHtml(content)
+                # 使用HtmlEditor组件处理HTML文件
+                try:
+                    editor = HtmlEditor()
+                    with open(abs_file_path, 'r', encoding='utf-8') as f: content = f.read()
+                    editor.set_html(content)
+                    # 连接修改信号
+                    editor.document_modified.connect(lambda modified: self.main_window.update_tab_title(modified))
+                except Exception as e:
+                    QMessageBox.critical(self.main_window, "错误", f"无法打开HTML文件 '{file_path}':\n{str(e)}")
+                    return
             else:  # 处理文本文件
                 try:
                     with open(abs_file_path, 'r', encoding='utf-8') as f: content = f.read()
@@ -104,8 +127,15 @@ class FileOperations:
             file_path = editor.property("file_path")
             try:
                 _, ext = os.path.splitext(file_path)
-                # 根据扩展名检查是保存为HTML还是纯文本
-                content_to_save = editor.toHtml() if ext.lower() == '.html' else editor.toPlainText()
+                # 根据扩展名和编辑器类型检查是保存为HTML还是纯文本
+                if ext.lower() == '.html' or isinstance(editor, HtmlEditor):
+                    # 使用to_html()方法获取HTML内容，这是HtmlEditor提供的兼容方法
+                    if isinstance(editor, HtmlEditor):
+                        content_to_save = editor.to_html()
+                    else:
+                        content_to_save = editor.document().toHtml()
+                else:
+                    content_to_save = editor.toPlainText()
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(content_to_save)
                 editor.document().setModified(False)
@@ -130,7 +160,11 @@ class FileOperations:
 
         # 根据内容或现有扩展名确定默认过滤器
         default_filter = "HTML文件 (*.html)"
-        is_plain = editor.toPlainText() == editor.toHtml()  # 基本检查内容是否可能是纯文本
+        # 检查内容是否可能是纯文本，需要考虑不同编辑器类型
+        if isinstance(editor, HtmlEditor):
+            is_plain = editor.to_plain_text() == editor.to_html()
+        else:
+            is_plain = editor.toPlainText() == editor.document().toHtml()  # 基本检查内容是否可能是纯文本
         if current_path and os.path.splitext(current_path)[1].lower() != '.html':
             default_filter = "文本文件 (*.txt)"
         elif is_plain and not current_path:  # 看起来像纯文本的新文件
@@ -150,8 +184,15 @@ class FileOperations:
 
             _, save_ext = os.path.splitext(abs_file_path)
             try:
-                # 根据最终扩展名保存为HTML或纯文本
-                content_to_save = editor.toHtml() if save_ext.lower() == '.html' else editor.toPlainText()
+                # 根据最终扩展名和编辑器类型保存为HTML或纯文本
+                if save_ext.lower() == '.html' or isinstance(editor, HtmlEditor):
+                    # 使用to_html()方法获取HTML内容，这是HtmlEditor提供的兼容方法
+                    if isinstance(editor, HtmlEditor):
+                        content_to_save = editor.to_html()
+                    else:
+                        content_to_save = editor.document().toHtml()
+                else:
+                    content_to_save = editor.toPlainText()
                 with open(abs_file_path, 'w', encoding='utf-8') as f:
                     f.write(content_to_save)
 
@@ -181,7 +222,7 @@ class FileOperations:
         widget = self.main_window.tab_widget.widget(index)
 
         # 处理非编辑器小部件（如潜在的未来PDF查看器标签直接）
-        if not isinstance(widget, TextEditWithLineNumbers):
+        if not isinstance(widget, (TextEditWithLineNumbers, HtmlEditor)):
             self.main_window.tab_widget.removeTab(index)
             widget.deleteLater()  # 确保非编辑器小部件被清理
             return

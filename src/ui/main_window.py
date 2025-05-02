@@ -13,6 +13,7 @@ import fitz  # PyMuPDF库
 from src.utils.theme_manager import ThemeManager
 from src.ui.file_explorer import FileExplorer
 from src.ui.editor import TextEditWithLineNumbers
+from src.ui.html_editor import HtmlEditor
 from src.ui.combined_tools_widget import CombinedToolsWidget
 from pathlib import Path
 from .note_downloader_widget import NoteDownloaderWidget
@@ -169,7 +170,8 @@ class MainWindow(QMainWindow):
     
     def create_actions(self):
         # 添加工具提示到所有操作
-        self.new_action = QAction("新建", self, shortcut="Ctrl+N", toolTip="创建新文件 (Ctrl+N)", triggered=self.new_file)
+        self.new_action = QAction("新建文本", self, shortcut="Ctrl+N", toolTip="创建新文本文件 (Ctrl+N)", triggered=self.new_file)
+        self.new_html_action = QAction("新建HTML", self, shortcut="Ctrl+Shift+N", toolTip="创建新HTML文件 (Ctrl+Shift+N)", triggered=lambda: self.file_operations.new_file("html"))
         self.open_action = QAction("打开...", self, shortcut="Ctrl+O", toolTip="打开现有文件 (Ctrl+O)", triggered=self.open_file_dialog)
         self.save_action = QAction("保存", self, shortcut="Ctrl+S", toolTip="保存当前文件 (Ctrl+S)", triggered=self.save_file, enabled=False)
         self.save_as_action = QAction("另存为...", self, shortcut="Ctrl+Shift+S", toolTip="将当前文件另存为... (Ctrl+Shift+S)", triggered=self.save_file_as, enabled=False)
@@ -201,7 +203,7 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
 
         file_menu = menu_bar.addMenu("文件")
-        file_menu.addActions([self.new_action, self.open_action, self.save_action, self.save_as_action])
+        file_menu.addActions([self.new_action, self.new_html_action, self.open_action, self.save_action, self.save_as_action])
         file_menu.addSeparator()
         file_menu.addAction(self.close_tab_action)
         file_menu.addSeparator()
@@ -238,7 +240,7 @@ class MainWindow(QMainWindow):
         self.toolbar.setIconSize(QSize(20, 20)) # 设置图标大小
 
         # --- 主要操作按钮 ---
-        self.toolbar.addActions([self.new_action, self.open_action, self.save_action])
+        self.toolbar.addActions([self.new_action, self.new_html_action, self.open_action, self.save_action])
         self.toolbar.addSeparator()
         self.toolbar.addActions([self.undo_action, self.redo_action])
         self.toolbar.addSeparator()
@@ -287,10 +289,13 @@ class MainWindow(QMainWindow):
         # 添加Zen模式全局快捷键
         self.addAction(self.zen_action)
     
-    def get_current_editor(self) -> TextEditWithLineNumbers | None:
+    def get_current_editor(self):
         # 确保返回正确的类型或None
         widget = self.tab_widget.currentWidget()
-        return widget if isinstance(widget, TextEditWithLineNumbers) else None
+        # 明确检查是否为TextEditWithLineNumbers或HtmlEditor类型
+        if isinstance(widget, (TextEditWithLineNumbers, HtmlEditor)):
+            return widget
+        return None
     
     def on_current_tab_changed(self, index):
         editor = self.get_current_editor()
@@ -313,9 +318,9 @@ class MainWindow(QMainWindow):
         self.copy_action.setEnabled(available)
         self.cut_action.setEnabled(available)
     
-    def update_edit_actions_state(self, editor: TextEditWithLineNumbers | None):
+    def update_edit_actions_state(self, editor):
         # 确保操作正确启用/禁用
-        has_editor = isinstance(editor, TextEditWithLineNumbers)
+        has_editor = isinstance(editor, (TextEditWithLineNumbers, HtmlEditor))
         # 安全获取剪贴板数据
         try:
             can_paste = QApplication.clipboard().text() != "" if has_editor else False
@@ -328,8 +333,17 @@ class MainWindow(QMainWindow):
             except TypeError: pass
             try: self.previous_editor.document().redoAvailable.disconnect(self.redo_action.setEnabled)
             except TypeError: pass
-            try: self.previous_editor.copyAvailable.disconnect(self._update_copy_cut_state)
-            except TypeError: pass
+            
+            # 处理不同编辑器类型的copyAvailable信号
+            if hasattr(self.previous_editor, 'copyAvailable') and callable(self.previous_editor.copyAvailable):
+                # HtmlEditor类型
+                try: self.previous_editor.copyAvailable().disconnect(self._update_copy_cut_state)
+                except TypeError: pass
+            else:
+                # TextEditWithLineNumbers类型
+                try: self.previous_editor.copyAvailable.disconnect(self._update_copy_cut_state)
+                except TypeError: pass
+                
             try: self.previous_editor.document().modificationChanged.disconnect(self.update_tab_title)
             except TypeError: pass
 
@@ -358,8 +372,17 @@ class MainWindow(QMainWindow):
             except TypeError: pass
             try: editor.document().redoAvailable.connect(self.redo_action.setEnabled)
             except TypeError: pass
-            try: editor.copyAvailable.connect(self._update_copy_cut_state)
-            except TypeError: pass
+            
+            # 处理不同编辑器类型的copyAvailable信号
+            if hasattr(editor, 'copyAvailable') and callable(editor.copyAvailable):
+                # HtmlEditor类型
+                try: editor.copyAvailable().connect(self._update_copy_cut_state)
+                except TypeError: pass
+            else:
+                # TextEditWithLineNumbers类型
+                try: editor.copyAvailable.connect(self._update_copy_cut_state)
+                except TypeError: pass
+                
             try: editor.document().modificationChanged.connect(self.update_tab_title)
             except TypeError: pass
             self.previous_editor = editor

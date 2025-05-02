@@ -129,13 +129,16 @@ class UIManager:
                 QMessageBox.warning(self.main_window, "警告", "无法提取PDF内容")
                 return
             
-            # 创建新的编辑器标签页
-            from src.ui.editor import TextEditWithLineNumbers
-            editor = TextEditWithLineNumbers()
+            # 创建新的HTML编辑器标签页
+            from src.ui.html_editor import HtmlEditor
+            editor = HtmlEditor()
             editor.setFontPointSize(12)
             
             # 设置HTML内容
-            editor.setHtml(html_content)
+            editor.set_html(html_content)
+            
+            # 连接修改信号
+            editor.document_modified.connect(lambda modified: self.main_window.update_tab_title(modified))
             
             # 添加标签页
             file_name = os.path.basename(pdf_path)
