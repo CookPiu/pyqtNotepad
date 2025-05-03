@@ -9,8 +9,8 @@ if src_path not in sys.path:
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
-# Now this import should work if src is in sys.path and src/ui has __init__.py
-from src.ui.main_window import MainWindow
+# Now this import should work if src is in sys.path and src/ui/main has __init__.py
+from src.ui.main.main_window import MainWindow # Updated import path
 
 # Corrected indentation for the entire block below
 if __name__ == "__main__":

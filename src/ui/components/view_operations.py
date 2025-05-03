@@ -1,97 +1,109 @@
-from PyQt6.QtWidgets import QMessageBox
-from PyQt6.QtCore import QSize
+from PyQt6.QtWidgets import QMessageBox, QDockWidget, QWidget # Add QDockWidget and QWidget
+from PyQt6.QtCore import QSize, Qt # Add Qt
+
+# Assuming UIManager is accessible via main_window or passed separately
+# from .ui_manager import UIManager
 
 class ViewOperations:
-    """处理MainWindow的视图操作功能"""
+    """处理MainWindow的视图操作功能 (Refactored)"""
     
-    def __init__(self, main_window):
+    def __init__(self, main_window, ui_manager): # Accept ui_manager
         self.main_window = main_window
-    
+        self.ui_manager = ui_manager # Store ui_manager
+        self._pre_zen_state = {} # Store visibility state for Zen mode
+
     def toggle_theme(self):
-        """切换亮色/暗色主题"""
-        self.main_window.theme_manager.toggle_theme()
-        self.main_window.apply_current_theme()
-        current_theme = "暗色" if self.main_window.theme_manager.is_dark_theme() else "亮色"
-        self.main_window.statusBar.showMessage(f"已切换到{current_theme}主题")
+        """切换亮色/暗色主题 (Delegates to UIManager)"""
+        # UIManager now handles theme toggling and application
+        self.ui_manager.toggle_theme()
+        # Status message update might also be handled by UIManager or MainWindow
+        current_theme = "暗色" if self.ui_manager.theme_manager.is_dark_theme() else "亮色"
+        if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+             self.main_window.statusBar.showMessage(f"已切换到{current_theme}主题")
     
-    def toggle_zen_mode(self, checked):
-        """切换Zen模式"""
-        if checked:  # 进入Zen模式
-            # 保存当前分割器大小以便恢复
-            self.main_window._pre_zen_sizes = {
-                'v_splitter': self.main_window.v_splitter.sizes(),
-                'editor_browser': self.main_window.editor_browser_splitter.sizes()
+    def toggle_zen_mode(self, checked: bool):
+        """切换 Zen 模式"""
+        if checked:  # 进入 Zen 模式
+            self._pre_zen_state = {
+                'sidebar_visible': self.main_window.sidebar_dock.isVisible(),
+                'activity_bar_visible': self.main_window.activity_bar_dock.isVisible(),
+                'toolbar_visible': self.main_window.toolbar.isVisible(),
+                'statusbar_visible': self.main_window.statusBar.isVisible(),
+                'window_state': self.main_window.windowState() # Save normal/maximized state
             }
-            
-            # 隐藏侧边栏、工具栏、菜单栏和状态栏
-            self.main_window.sidebar.setVisible(False)
-            self.main_window.toolbar.setVisible(False)
-            self.main_window.activity_bar.setVisible(False)
-            self.main_window.menuBar().setVisible(False)
-            self.main_window.statusBar.setVisible(False)
-            
-            # 隐藏浏览器区域
-            sizes = self.main_window.editor_browser_splitter.sizes()
-            if len(sizes) == 2 and sizes[1] > 0:  # 如果浏览器可见
-                self.main_window.editor_browser_splitter.setSizes([1, 0])  # 折叠浏览器
-            
-            # 设置窗口为全屏
+            # Hide docks and bars
+            self.main_window.sidebar_dock.hide()
+            self.main_window.activity_bar_dock.hide()
+            self.main_window.toolbar.hide()
+            self.main_window.statusBar.hide()
+            # Hide menu bar if it exists and is visible
+            if self.main_window.menuBar(): self.main_window.menuBar().hide()
+
+            # Hide other docks managed by UIManager? (Optional)
+            # for dock in self.ui_manager.view_docks.values(): dock.hide()
+
             self.main_window.showFullScreen()
-            self.main_window.statusBar.showMessage("已进入Zen模式 (F11退出)")
-        else:  # 退出Zen模式
-            # 恢复分割器大小
-            if self.main_window._pre_zen_sizes:
-                if 'v_splitter' in self.main_window._pre_zen_sizes:
-                    self.main_window.v_splitter.setSizes(self.main_window._pre_zen_sizes['v_splitter'])
-                if 'editor_browser' in self.main_window._pre_zen_sizes:
-                    self.main_window.editor_browser_splitter.setSizes(self.main_window._pre_zen_sizes['editor_browser'])
-            
-            # 恢复UI元素可见性
-            self.main_window.sidebar.setVisible(True)
-            self.main_window.toolbar.setVisible(True)
-            self.main_window.activity_bar.setVisible(True)
-            self.main_window.statusBar.setVisible(True)
-            
-            # 退出全屏
-            self.main_window.showNormal()
-            self.main_window.statusBar.showMessage("已退出Zen模式")
+            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                 # Status bar is hidden, maybe show temporary message elsewhere or log
+                 print("已进入Zen模式 (F11退出)")
+        else:  # 退出 Zen 模式
+            # Restore visibility based on saved state
+            if self._pre_zen_state.get('sidebar_visible', True): self.main_window.sidebar_dock.show()
+            if self._pre_zen_state.get('activity_bar_visible', True): self.main_window.activity_bar_dock.show()
+            if self._pre_zen_state.get('toolbar_visible', True): self.main_window.toolbar.show()
+            if self._pre_zen_state.get('statusbar_visible', True): self.main_window.statusBar.show()
+            if self.main_window.menuBar(): self.main_window.menuBar().setVisible(False) # Keep menu hidden by default
+
+            # Restore previous window state (Normal or Maximized)
+            previous_state = self._pre_zen_state.get('window_state', Qt.WindowState.WindowNoState)
+            if previous_state == Qt.WindowState.WindowMaximized:
+                 self.main_window.showMaximized()
+            else:
+                 self.main_window.showNormal()
+
+            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                 self.main_window.statusBar.showMessage("已退出Zen模式")
+            self._pre_zen_state = {} # Clear saved state
     
-    def toggle_sidebar(self, show=None):
-        """切换侧边栏显示/隐藏"""
-        # 获取当前侧边栏宽度
-        current_sizes = self.main_window.v_splitter.sizes()
-        
-        # 如果show参数未指定，则根据当前状态切换
+    def toggle_sidebar(self, show: bool | None = None):
+        """切换侧边栏 Dock 的可见性"""
+        if not hasattr(self.main_window, 'sidebar_dock'): return
+
         if show is None:
-            show = current_sizes[0] == 0  # 如果当前宽度为0，则显示
-        
-        if show:  # 显示侧边栏
-            # 恢复保存的宽度，或使用默认宽度
-            new_sizes = [self.main_window._saved_sidebar_width, current_sizes[1] - self.main_window._saved_sidebar_width]
-            self.main_window.v_splitter.setSizes(new_sizes)
-            self.main_window.statusBar.showMessage("已显示侧边栏")
-        else:  # 隐藏侧边栏
-            # 保存当前宽度以便恢复
-            if current_sizes[0] > 0:
-                self.main_window._saved_sidebar_width = current_sizes[0]
-            # 设置宽度为0以隐藏
-            self.main_window.v_splitter.setSizes([0, sum(current_sizes)])
-            self.main_window.statusBar.showMessage("已隐藏侧边栏")
-    
-    def _collapse_global_browser(self):
-        """折叠全局浏览器区域"""
-        if len(self.main_window.editor_browser_splitter.sizes()) == 2:
-            self.main_window.editor_browser_splitter.setSizes([1, 0])
-    
-    def _restore_global_browser(self):
-        """恢复全局浏览器区域"""
-        if len(self.main_window.editor_browser_splitter.sizes()) == 2:
-            self.main_window.editor_browser_splitter.setSizes([2, 1])
-    
+            show = not self.main_window.sidebar_dock.isVisible()
+
+        self.main_window.sidebar_dock.setVisible(show)
+        # Status message update might be redundant if visibilityChanged signal handles it
+        # if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+        #      status = "显示" if show else "隐藏"
+        #      self.main_window.statusBar.showMessage(f"侧边栏已{status}")
+    # --- Browser Pane Handling (Removed/Commented - Depends on Final Layout) ---
+    # def _collapse_global_browser(self):
+    #     """折叠全局浏览器区域 (If applicable)"""
+    #     # Check if the relevant splitter exists and adjust sizes
+    #     # Example: if hasattr(self.main_window, 'editor_browser_splitter'): ...
+    #     print("Note: Global browser collapse logic needs review based on final layout.")
+    #
+    # def _restore_global_browser(self):
+    #     """恢复全局浏览器区域 (If applicable)"""
+    #     # Check if the relevant splitter exists and adjust sizes
+    #     print("Note: Global browser restore logic needs review based on final layout.")
+
+    def handle_tab_change(self, current_widget: QWidget | None):
+         """根据当前标签页调整UI（例如，浏览器面板）"""
+         # This logic might be simplified or removed if the browser pane isn't used globally
+         # Example: Check if current_widget is NoteDownloaderView and collapse browser
+         # from ..views.note_downloader_view import NoteDownloaderView # Import locally if needed
+         # if isinstance(current_widget, NoteDownloaderView):
+         #      self._collapse_global_browser()
+         # else:
+         #      self._restore_global_browser()
+         pass # Placeholder - review based on final layout needs
+
     def show_about(self):
         """显示关于信息"""
-        QMessageBox.about(self.main_window, "关于多功能记事本",
-                         "<h3>多功能记事本</h3>"
-                         "<p>版本 1.0</p>"
-                         "<p>一个功能丰富的记事本应用程序，支持文本编辑、PDF预览、计算器、日历等功能。</p>"
-                         "<p>© 2023 示例公司</p>")
+        QMessageBox.about(self.main_window, "关于 Pynote Refactored",
+                         "<h3>Pynote Refactored</h3>"
+                         "<p>版本 1.1 (重构版)</p>"
+                         "<p>一个基于 PyQt6 的多功能记事本应用。</p>"
+                         "<p>包含文本/HTML 编辑、文件浏览、PDF 预览、工具集等。</p>")
