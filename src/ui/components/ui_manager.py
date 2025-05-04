@@ -1,7 +1,7 @@
-import os # Add os import
-import os # Keep os import
-from PyQt6.QtWidgets import QDockWidget, QMessageBox, QWidget, QTabWidget # Add QWidget, QTabWidget
+import os
+from PyQt6.QtWidgets import QDockWidget, QMessageBox, QWidget, QTabWidget
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon # **Import QIcon**
 
 # --- Corrected Relative Imports ---
 from ..composite.combined_tools import CombinedTools
@@ -238,7 +238,8 @@ class UIManager:
                  dock = QDockWidget(view_name, self.main_window)
                  dock.setObjectName(f"{view_name}Dock")
                  dock.setWidget(instance)
-                 dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea)
+                 # Allow docking anywhere
+                 dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
                  # Decide initial dock area (e.g., Right)
                  self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
                  self.view_docks[view_name] = dock # Store dock reference

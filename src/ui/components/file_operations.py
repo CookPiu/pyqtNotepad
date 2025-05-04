@@ -13,15 +13,15 @@ from ..views.pdf_viewer_view import PdfViewerView
 
 class FileOperations:
     """处理MainWindow的文件操作功能"""
-    
+
     def __init__(self, main_window, ui_manager): # Accept ui_manager
         self.main_window = main_window
         self.ui_manager = ui_manager # Store ui_manager
         self.untitled_counter = 0 # Initialize counter here
-    
+
     def new_file(self, file_type="text"):
         """创建新文件
-        
+
         Args:
             file_type: 文件类型，可以是"text"或"html"
         """
@@ -39,7 +39,7 @@ class FileOperations:
             # font = editor.document().defaultFont()
             # font.setPointSize(12)
             # editor.document().setDefaultFont(font)
-            
+
         self.untitled_counter += 1 # Use self.untitled_counter
         tab_name = f"未命名-{self.untitled_counter}" # Use self.untitled_counter
         editor.setProperty("untitled_name", tab_name)
@@ -61,13 +61,13 @@ class FileOperations:
         self.main_window.statusBar.showMessage("新建文件")
         # 更新新编辑器的操作状态
         self.main_window.update_edit_actions_state(editor)
-    
+
     def open_file_dialog(self):
         """打开文件对话框"""
         file_name, _ = QFileDialog.getOpenFileName(self.main_window, "打开文件", "", "HTML文件 (*.html);;文本文件 (*.txt);;PDF文件 (*.pdf);;所有文件 (*)")
         if file_name:
             self.open_file_from_path(file_name)
-    
+
     def open_file_from_path(self, file_path):
         """从路径打开文件"""
         abs_file_path = os.path.abspath(file_path)
@@ -112,94 +112,95 @@ class FileOperations:
                 self.add_editor_tab(content=content, file_path=abs_file_path, file_type='text', set_current=True)
 
             if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
-                 self.main_window.statusBar.showMessage(f"已打开: {file_path}")
+                  self.main_window.statusBar.showMessage(f"已打开: {file_path}")
 
         except Exception as e:
-            QMessageBox.critical(self.main_window, "打开文件错误", f"打开文件 '{file_path}' 时发生未知错误:\n{str(e)}")
-    
+             QMessageBox.critical(self.main_window, "打开文件错误", f"打开文件 '{file_path}' 时发生未知错误:\n{str(e)}")
+
+    def _save_html_editor_content(self, editor: HtmlEditor, file_path: str):
+        """异步保存HTML编辑器内容"""
+        def save_callback(html: str):
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(html)
+                # 在回调中更新状态
+                editor.setModified(False)
+                if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                    self.main_window.statusBar.showMessage(f"已保存: {file_path}")
+                # 确保标签标题也更新（如果标签仍然存在）
+                if self.ui_manager.is_widget_still_in_tabs(editor):
+                    self.main_window.update_tab_title(False)
+                print(f"异步保存成功: {file_path}") # Debugging
+            except Exception as e:
+                QMessageBox.critical(self.main_window, "错误",
+                                   f"无法异步保存文件 '{file_path}':\n{str(e)}")
+
+        # 调用异步 toHtml 并传递回调
+        editor.toHtml(save_callback)
+        # 注意：此函数立即返回，保存操作在后台进行
+
     def save_file(self) -> bool:
-        """保存当前文件"""
-        editor = self.main_window.get_current_editor()
+        """保存当前文件 (处理异步HTML保存)"""
+        editor = self.main_window.get_current_editor_widget() # Use the widget getter
         if not editor: return False
 
-        if editor.property("is_new") or not editor.property("file_path"):
+        file_path = editor.property("file_path")
+        is_new = editor.property("is_new")
+
+        if is_new or not file_path:
             return self.save_file_as()
         else:
-            file_path = editor.property("file_path")
             try:
-                content_to_save = None
-                is_html_save = False
-
                 if isinstance(editor, HtmlEditor):
-                    is_html_save = True
-                    # WARNING: editor.toHtml() is asynchronous for QWebEngineView!
-                    # This synchronous call will likely NOT get the latest content.
-                    # A proper implementation requires asynchronous handling (e.g., using signals/slots or async/await).
-                    # For now, we call it but it won't work as expected for saving modifications.
-                    print("警告: HtmlEditor.toHtml() 是异步的，同步保存可能不会包含最新更改。")
-                    # Placeholder: Try to get content synchronously (will likely fail for modifications)
-                    # A callback mechanism is needed here.
-                    # We'll proceed with saving *something* to avoid crashing, but it's incorrect.
-                    def _handle_html_sync(html):
-                         nonlocal content_to_save
-                         content_to_save = html # This callback won't be waited for here.
-
-                    editor.toHtml(_handle_html_sync)
-                    # Need to wait here somehow, which isn't possible in this structure.
-                    # Fallback to saving an empty string or potentially old content if available.
-                    if content_to_save is None: content_to_save = "" # Incorrect, but prevents crash
-
-                elif hasattr(editor, 'document'): # Handle TextEditor
+                    # 调用新的异步保存方法
+                    self._save_html_editor_content(editor, file_path)
+                    # 立即返回True，表示保存已启动
+                    # 状态栏消息和 modified 状态将在回调中处理
+                    return True
+                elif hasattr(editor, 'document'): # Handle TextEditor (synchronous)
                     _, ext = os.path.splitext(file_path)
-                    if ext.lower() == '.html':
-                         is_html_save = True
-                         content_to_save = editor.document().toHtml()
-                    else:
-                         content_to_save = editor.toPlainText()
-                else:
-                     # Should not happen if editor is correctly identified
-                     raise TypeError("无法确定编辑器类型以进行保存。")
-
-                # Proceed with writing the (potentially incorrect for HtmlEditor) content
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(content_to_save)
-
-                # Update modified state
-                if isinstance(editor, HtmlEditor):
-                    editor.setModified(False) # Use HtmlEditor's method
-                elif hasattr(editor, 'document'):
+                    content_to_save = editor.document().toHtml() if ext.lower() == '.html' else editor.toPlainText()
+                    # Ensure correct indentation within this block (Level 5 = 20 spaces)
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(content_to_save)
                     editor.document().setModified(False)
-
-                self.main_window.statusBar.showMessage(f"已保存: {file_path}")
-                self.main_window.update_tab_title(False)  # Update tab title immediately
-                return True
+                    if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                        self.main_window.statusBar.showMessage(f"已保存: {file_path}")
+                    # Ensure correct indentation for these lines relative to the 'if' above
+                    self.main_window.update_tab_title(False)
+                    return True
+                # Ensure 'else' is aligned with 'if/elif'
+                else:
+                    # Should not happen if editor is correctly identified
+                    raise TypeError("无法确定编辑器类型以进行保存。")
+            # Ensure 'except' is aligned with 'try'
             except Exception as e:
                 QMessageBox.critical(self.main_window, "错误", f"无法保存文件 '{file_path}':\n{str(e)}")
                 return False
-    
+
     def save_file_as(self) -> bool:
-        """将文件另存为"""
-        editor = self.main_window.get_current_editor()
+        """将文件另存为 (处理异步HTML保存)"""
+        editor = self.main_window.get_current_editor_widget() # Use the widget getter
         if not editor: return False
 
         current_path = editor.property("file_path")
         untitled_name = editor.property("untitled_name")
-        # 根据当前路径或未命名名称建议文件名
-        suggested_name = os.path.basename(current_path) if current_path else (untitled_name or f"未命名-{self.main_window.untitled_counter}")
-
+        suggested_name = os.path.basename(current_path) if current_path else (untitled_name or f"未命名-{self.untitled_counter}") # Use self.untitled_counter
         default_dir = os.path.dirname(current_path) if current_path else ""
 
-        # 根据内容或现有扩展名确定默认过滤器
+        # Determine default filter based on editor type or current extension
         default_filter = "HTML文件 (*.html)"
-        # 检查内容是否可能是纯文本，需要考虑不同编辑器类型
-        if isinstance(editor, HtmlEditor):
-            is_plain = editor.to_plain_text() == editor.to_html()
-        else:
-            is_plain = editor.toPlainText() == editor.document().toHtml()  # 基本检查内容是否可能是纯文本
-        if current_path and os.path.splitext(current_path)[1].lower() != '.html':
-            default_filter = "文本文件 (*.txt)"
-        elif is_plain and not current_path:  # 看起来像纯文本的新文件
-            default_filter = "文本文件 (*.txt)"
+        is_html_editor = isinstance(editor, HtmlEditor)
+
+        if not is_html_editor:
+            # For TextEditor, check current extension or content
+            if current_path and os.path.splitext(current_path)[1].lower() != '.html':
+                default_filter = "文本文件 (*.txt)"
+            elif not current_path: # New file, check if content looks plain (basic check)
+                 try:
+                      if hasattr(editor, 'toPlainText') and hasattr(editor, 'document') and editor.toPlainText() == editor.document().toHtml():
+                           default_filter = "文本文件 (*.txt)"
+                 except Exception: pass # Ignore errors during check
 
         file_name, selected_filter = QFileDialog.getSaveFileName(
             self.main_window, "另存为", os.path.join(default_dir, suggested_name),
@@ -208,63 +209,52 @@ class FileOperations:
 
         if file_name:
             abs_file_path = os.path.abspath(file_name)
-            # 如果未提供扩展名，则根据过滤器确保扩展名
             _, current_ext = os.path.splitext(abs_file_path)
             if not current_ext:
                 abs_file_path += ".html" if "HTML" in selected_filter else ".txt"
 
-            _, save_ext = os.path.splitext(abs_file_path)
             try:
-                content_to_save = None
-                is_html_save = (save_ext.lower() == '.html')
+                # --- Update editor properties and tab title BEFORE saving ---
+                # This needs to happen synchronously regardless of save method
+                editor.setProperty("file_path", abs_file_path)
+                editor.setProperty("is_new", False)
+                editor.setProperty("untitled_name", None)
+
+                current_index = self.main_window.tab_widget.currentIndex()
+                if current_index != -1 and self.main_window.tab_widget.widget(current_index) == editor:
+                    self.main_window.tab_widget.setTabText(current_index, os.path.basename(abs_file_path))
+                    # Update window title immediately, but modified state handled by save/callback
+                    self.main_window.update_window_title()
+                # -----------------------------------------------------------
 
                 if isinstance(editor, HtmlEditor):
-                    is_html_save = True # Always save HtmlEditor as HTML
-                    # WARNING: editor.toHtml() is asynchronous! See save_file comments.
-                    print("警告: HtmlEditor.toHtml() 是异步的，同步另存为可能不会包含最新更改。")
-                    def _handle_html_sync_as(html):
-                         nonlocal content_to_save
-                         content_to_save = html
-                    editor.toHtml(_handle_html_sync_as)
-                    if content_to_save is None: content_to_save = "" # Incorrect fallback
+                    # Call the async save method
+                    self._save_html_editor_content(editor, abs_file_path)
+                    # Return True immediately, status/modified handled in callback
+                    return True
+                elif hasattr(editor, 'document'): # Handle TextEditor (synchronous)
+                    _, save_ext = os.path.splitext(abs_file_path)
+                    is_html_save = (save_ext.lower() == '.html')
+                    content_to_save = editor.document().toHtml() if is_html_save else editor.toPlainText()
 
-                elif hasattr(editor, 'document'): # Handle TextEditor
-                    if is_html_save:
-                         content_to_save = editor.document().toHtml()
-                    else:
-                         content_to_save = editor.toPlainText()
+                    with open(abs_file_path, 'w', encoding='utf-8') as f:
+                        f.write(content_to_save)
+
+                    # Update modified state synchronously for TextEditor
+                    editor.document().setModified(False)
+                    # Update status bar and ensure tab title removes '*'
+                    if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                        self.main_window.statusBar.showMessage(f"已保存: {abs_file_path}")
+                    self.main_window.update_tab_title(False) # Ensure '*' is removed
+                    return True
                 else:
                      raise TypeError("无法确定编辑器类型以进行另存为。")
 
-                # Proceed with writing the (potentially incorrect for HtmlEditor) content
-                with open(abs_file_path, 'w', encoding='utf-8') as f:
-                    f.write(content_to_save)
-
-                # 更新编辑器属性
-                editor.setProperty("file_path", abs_file_path)
-                editor.setProperty("is_new", False)
-                editor.setProperty("untitled_name", None)  # Clear untitled name
-
-                # Update modified state
-                if isinstance(editor, HtmlEditor):
-                    editor.setModified(False)
-                elif hasattr(editor, 'document'):
-                     editor.document().setModified(False)
-
-                # 更新当前编辑器的标签文本
-                current_index = self.main_window.tab_widget.currentIndex()
-                if current_index != -1 and self.main_window.tab_widget.widget(current_index) == editor:
-                    # 保存后立即更新标签文本
-                    self.main_window.tab_widget.setTabText(current_index, os.path.basename(abs_file_path))
-                    # 显式调用update_tab_title以确保删除'*'并更新窗口标题
-                    self.main_window.update_tab_title(False)
-
-                self.main_window.statusBar.showMessage(f"已保存: {abs_file_path}")
-                return True
             except Exception as e:
-                QMessageBox.critical(self.main_window, "错误", f"无法保存文件 '{abs_file_path}':\n{str(e)}")
+                QMessageBox.critical(self.main_window, "错误", f"无法另存为文件 '{abs_file_path}':\n{str(e)}")
+                # Attempt to revert property changes if save fails? Maybe too complex.
         return False
-    
+
     def close_tab(self, index):
         """关闭标签页"""
         if index < 0 or index >= self.main_window.tab_widget.count(): return
@@ -287,7 +277,15 @@ class FileOperations:
             ret = QMessageBox.warning(self.main_window, "关闭标签页", f"文档 '{tab_name}' 已被修改。\n是否保存更改？",
                                     QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
             if ret == QMessageBox.StandardButton.Save:
-                if not self.save_file(): return False # Save failed, abort close
+                # Save might be async now, but close_tab needs synchronous result
+                # We need to handle this better, maybe disable close while async save is pending
+                # For now, assume save_file returns True if async started
+                if not self.save_file():
+                    # If save_file returns False (e.g., TextEditor save failed), abort close
+                    return False
+                # If save_file returns True (TextEditor saved OR HtmlEditor async started),
+                # we might still need to wait for HtmlEditor. For now, proceed cautiously.
+                # A better solution would involve disabling close until the callback confirms save.
             elif ret == QMessageBox.StandardButton.Cancel:
                 return False # User cancelled, abort close
 

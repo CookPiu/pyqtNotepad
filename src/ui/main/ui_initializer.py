@@ -131,6 +131,7 @@ class UIInitializer:
          activity_layout.setContentsMargins(0, 5, 0, 5)
          activity_layout.setSpacing(5)
          activity_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+         activity_bar_widget.setMinimumWidth(40) # **Set a minimum width for the container**
 
          # --- Activity Bar Buttons ---
          # Files Button (Toggles Sidebar Dock)
@@ -142,10 +143,61 @@ class UIInitializer:
          activity_layout.addWidget(files_btn)
          self.main_window.toggle_sidebar_button = files_btn # Store reference
 
+         # --- Dynamically Add Buttons for Registered Views ---
+         print("UIInitializer: Adding buttons for registered views to activity bar...")
+         if hasattr(self.ui_manager, 'registered_views'):
+             for view_name, view_info in self.ui_manager.registered_views.items():
+                 try:
+                     # Skip FileExplorer as it's handled by the sidebar toggle
+                     # Also skip PDFViewer as it's opened contextually
+                     if view_name in ["FileExplorer", "PdfViewer"]:
+                          continue
+
+                     icon_name = view_info.get("icon")
+                     icon = QIcon() # Default empty icon
+                     use_text = True # Default to using text
+
+                     if icon_name:
+                         loaded_icon = QIcon.fromTheme(icon_name)
+                         # Check if the theme icon is valid (not null)
+                         if not loaded_icon.isNull():
+                              icon = loaded_icon
+                              use_text = False
+                         # else: print(f"  Warning: Theme icon '{icon_name}' not found for {view_name}.") # Optional warning
+
+                     # If no valid icon was found, use text
+                     view_btn = QToolButton()
+                     view_btn.setToolTip(f"打开/切换到 {view_name}") # Set tooltip first
+                     if use_text:
+                         view_btn.setText(view_name[:3]) # Use first 3 chars as short text, or full name
+                         view_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly) # **Set text only style**
+                         # view_btn.setMinimumSize(30, 25) # Optional: Ensure minimum size for text buttons
+                         print(f"  Using text '{view_btn.text()}' for button: {view_name}")
+                     else:
+                         view_btn.setIcon(icon)
+                         view_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly) # Explicitly set icon only
+                         print(f"  Using icon for button: {view_name}")
+
+                     view_btn.setCheckable(False) # Keep as non-checkable for simple open action
+
+                     # Connect to open_view, prefer opening tools in docks
+                     # Use a lambda that captures the current view_name
+                     view_btn.clicked.connect(lambda checked=False, v_name=view_name: self.ui_manager.open_view(v_name, open_in_dock=True))
+
+                     activity_layout.addWidget(view_btn)
+                     print(f"  Added button for: {view_name}")
+
+                 except Exception as e:
+                      print(f"  Error adding button for view '{view_name}': {e}")
+         else:
+              print("UIInitializer: ui_manager has no registered_views attribute.")
+
+
          activity_layout.addStretch() # Push buttons to top
 
          self.main_window.activity_bar_dock.setWidget(activity_bar_widget)
          self.main_window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.main_window.activity_bar_dock)
+         # self.main_window.activity_bar_dock.show() # **Explicitly show the dock (optional)**
 
          # Set initial state (e.g., sidebar visible means button checked)
          # This depends on whether the sidebar dock starts visible

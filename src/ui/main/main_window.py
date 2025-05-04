@@ -334,6 +334,10 @@ class MainWindow(QMainWindow):
         # print(f"DEBUG: get_current_editor_widget: Returning non-editor widget: {type(current_tab_content)}")
         return current_tab_content # Return the original widget (e.g., a view)
 
+    def get_current_editor(self):
+        """获取当前编辑器的别名方法，用于兼容性"""
+        return self.get_current_editor_widget()
+
     def on_current_tab_changed(self, index):
         """Updates UI elements when the current tab changes."""
         current_widget = self.get_current_editor_widget()
