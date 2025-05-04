@@ -3,10 +3,10 @@ import requests
 from urllib.parse import urljoin, unquote, urlparse # Keep unquote here
 from bs4 import BeautifulSoup
 from tqdm import tqdm
-from . import utils # 导入我们自己的 utils 模块
+import utils # 导入我们自己的 utils 模块
 import re   # 导入 re 用于更复杂的 文件名提取
-from . import checker # 导入新的 checker 模块
-from .classifier import FileClassifier # 导入分类器
+import checker # 导入新的 checker 模块
+from classifier import FileClassifier # 导入分类器
 
 log = utils.log # 复用 utils 中的 logger
 

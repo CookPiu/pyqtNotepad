@@ -50,11 +50,11 @@ class DownloadWorker(QThread):
         try:
             # Perform imports *after* potentially modifying sys.path
             # Use absolute imports relative to the added path
-            from src import utils as nd_utils
-            from src import crawler as nd_crawler
-            from src import downloader as nd_downloader
-            from src.classifier import FileClassifier as NDFileClassifier
-            from src import checker as nd_checker
+            import utils as nd_utils
+            import crawler as nd_crawler
+            import downloader as nd_downloader
+            from classifier import FileClassifier as NDFileClassifier
+            import checker as nd_checker
 
             # --- Helper function ---
             def sanitize_foldername(name):
@@ -153,8 +153,8 @@ class DownloadWorker(QThread):
                                 resource_links,
                                 str(course_download_folder),
                                 manifest,
-                                classifier_instance,
-                                logger_func=self.log_message.emit # Pass the emit method
+                                classifier_instance
+                                # logger_func=self.log_message.emit # Removed unexpected argument
                             )
                             total_files_downloaded += downloaded
                             total_files_skipped += skipped
