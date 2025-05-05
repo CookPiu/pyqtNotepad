@@ -6,8 +6,14 @@ class SpeechConfig:
     """语音识别配置管理类"""
     
     def __init__(self):
-        # 确定配置文件路径
-        self.config_dir = os.path.join(os.path.expanduser("~"), ".speech_recognition")
+        # 确定配置文件路径 - 使用项目根目录下的data目录
+        # 获取项目根目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # 从当前文件位置向上导航到项目根目录
+        # src/ui/atomic/mini_tools -> 需要向上4级到达项目根目录
+        project_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..', '..'))
+        
+        self.config_dir = os.path.join(project_root, "data", "speech_recognition")
         self.config_file = os.path.join(self.config_dir, "config.json")
         
         # 默认配置
