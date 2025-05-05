@@ -6,6 +6,7 @@ from PyQt6.QtGui import QIcon # **Import QIcon**
 # --- Corrected Relative Imports ---
 from ..composite.combined_tools import CombinedTools
 from ..atomic.mini_tools.calculator_widget import CalculatorWidget
+from ..atomic.mini_tools.speech_recognition_widget import SpeechRecognitionWidget
 from ..views.note_downloader_view import NoteDownloaderView
 from ..views.pdf_viewer_view import PdfViewerView
 # Import BaseWidget for type checking if needed
@@ -27,6 +28,9 @@ class UIManager:
         self.registered_views = {} # Initialize view registry
         self.view_instances = {} # Initialize instance cache
         self.view_docks = {} # Initialize dock cache
+        
+        # 注册语音识别组件
+        self.register_speech_recognition()
     
     def apply_current_theme(self):
         """应用当前主题到UI组件"""
@@ -101,6 +105,7 @@ class UIManager:
             "计算器": "Calculator",
             "日历": "Calendar",
             "笔记下载": "NoteDownloader",
+            "语音识别": "SpeechRecognition",
         }
         view_name_to_open = view_map.get(item_text)
 
@@ -338,3 +343,7 @@ class UIManager:
                 if editor_path and os.path.abspath(editor_path) == abs_file_path:
                     self.tab_widget.setCurrentIndex(i)
                     break
+                    
+    def register_speech_recognition(self):
+        """注册语音识别组件"""
+        self.register_view(SpeechRecognitionWidget, "SpeechRecognition", "microphone")

@@ -206,31 +206,41 @@ class UIInitializer:
 
     def _setup_sidebar_dock(self):
         """设置侧边栏 DockWidget (包含文件浏览器等)"""
-        self.main_window.sidebar_dock = QDockWidget("浏览器", self.main_window)
+        self.main_window.sidebar_dock = QDockWidget("侧边栏", self.main_window)
         self.main_window.sidebar_dock.setObjectName("SidebarDock")
         self.main_window.sidebar_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.main_window.sidebar_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
 
         sidebar_widget = QWidget()
         sidebar_layout = QVBoxLayout(sidebar_widget)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)
 
-        # --- File Explorer ---
-        # FileExplorer is now an atomic widget
-        self.main_window.file_explorer = FileExplorer(initial_path=os.getcwd()) # Start in CWD or a default path
-        # Connect signal to MainWindow's handler (now in FileOperations)
-        self.main_window.file_explorer.file_double_clicked.connect(self.main_window.file_operations.open_file_from_path)
-        sidebar_layout.addWidget(self.main_window.file_explorer)
+        # --- Sidebar List Widget ---
+        self.main_window.sidebar_list = QListWidget()
+        self.main_window.sidebar_list.setObjectName("SidebarList")
+        self.main_window.sidebar_list.setMinimumWidth(150) # Set minimum width
+        self.main_window.sidebar_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # --- Add other sidebar elements if needed (e.g., Outline, Search Results) ---
-        # The old function_list is removed, functionality handled by UIManager/Actions
-
+        # Add items to sidebar
+        sidebar_items = ["文件浏览器", "计算器", "计时器", "便签与待办", "日历", "笔记下载", "语音识别"]
+        for item_text in sidebar_items:
+            item = QListWidgetItem(item_text)
+            self.main_window.sidebar_list.addItem(item)
+            
+        # 连接点击事件到UI管理器
+        self.main_window.sidebar_list.itemClicked.connect(self.ui_manager.sidebar_item_clicked)
+        
+        # 添加到侧边栏布局
+        sidebar_layout.addWidget(self.main_window.sidebar_list)
+        
+        # 设置侧边栏小部件
         self.main_window.sidebar_dock.setWidget(sidebar_widget)
         self.main_window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.main_window.sidebar_dock)
-
-        # Connect visibility changes to the activity bar button state
+        
+        # 连接可见性变化到活动栏按钮状态
         self.main_window.sidebar_dock.visibilityChanged.connect(self.main_window.toggle_sidebar_button.setChecked)
-        # Set initial button state based on dock visibility
+        # 根据侧边栏可见性设置初始按钮状态
         self.main_window.toggle_sidebar_button.setChecked(self.main_window.sidebar_dock.isVisible())
 
 
