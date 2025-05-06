@@ -49,10 +49,41 @@ class EditOperations:
             print("Error: No current editor widget found.")
             return
 
-        # 1) 如果剪贴板有图片
-        if mime.hasImage():
-            # --- Detailed Debug Prints ---
-            print("-" * 20)
+        # --- Further Refined Logic ---
+        if isinstance(editor, HtmlEditor):
+            # For HtmlEditor:
+            if mime.hasImage():
+                # If clipboard has an image, do nothing here.
+                # Rely *entirely* on the injected JS 'paste' event listener in HtmlEditor.
+                print("DEBUG: Editor is HtmlEditor and mime has image. Python doing nothing, relying on JS listener.")
+                # We don't call execCommand('paste') here to avoid potential conflicts.
+                # The JS listener should call event.preventDefault() for images.
+            elif mime.hasText():
+                # If clipboard only has text, use JS execCommand to paste it.
+                print("DEBUG: Editor is HtmlEditor and mime has text (no image). Using JS execCommand('paste').")
+                editor.run_js("document.execCommand('paste');")
+                if hasattr(editor, 'setModified'): editor.setModified(True)
+            else:
+                 print("DEBUG: Editor is HtmlEditor, but clipboard has neither image nor text.")
+            return # HtmlEditor paste handling logic complete for this function call.
+
+        # --- Logic for non-HtmlEditor (e.g., _InternalTextEdit) ---
+        # This part only runs if editor is NOT HtmlEditor
+        else:
+            print(f"DEBUG: Editor is not HtmlEditor ({type(editor)}). Using standard paste logic.")
+            # Delegate directly to the editor's paste method.
+            # This will trigger ResizableImageTextEdit.insertFromMimeData for images,
+            # or the standard QTextEdit paste for text.
+            if hasattr(editor, 'paste'):
+                 editor.paste()
+            else:
+                 print(f"Paste not supported for this editor type: {type(editor)}")
+            return # Non-HtmlEditor paste handled.
+
+        # --- Old Logic (Commented out or removed for clarity) ---
+        # The following blocks are now effectively replaced by the logic above.
+        # elif mime.hasImage(): # This condition is now handled within the non-HtmlEditor 'else' block
+            # print("-" * 20) # Keep debug prints for non-HTML path
             print(f"DEBUG (Image Paste): Editor Object: {editor}")
             print(f"DEBUG (Image Paste): type(editor): {type(editor)}")
             print(f"DEBUG (Image Paste): editor.__class__.__name__: {editor.__class__.__name__}")
@@ -93,51 +124,25 @@ class EditOperations:
 
             # Check type directly using isinstance for HtmlEditor
             if isinstance(editor, HtmlEditor):
-                print("DEBUG: Pasting image into HtmlEditor")
-                js = f"""
-                (function(){{
-                  var img = document.createElement('img');
-                  img.src = '{data_url}';
-                  var sel = window.getSelection();
-                  if(sel.rangeCount > 0) {{
-                    var range = sel.getRangeAt(0);
-                    range.deleteContents();
-                    range.insertNode(img);
-                    range.setStartAfter(img);
-                    range.setEndAfter(img);
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                  }} else {{
-                    document.body.appendChild(img);
-                  }}
-                }})();
-                """
-                editor.run_js(js)
-                if hasattr(editor, 'setModified'): editor.setModified(True) # HtmlEditor needs explicit setModified
-            # Check if it's _InternalTextEdit (which now inherits QTextEdit)
-            # Use isinstance check now that the base class is correct
+                # Let the injected JavaScript in HtmlEditor handle the paste entirely.
+                # Do nothing here for image pasting in HtmlEditor.
+                print("DEBUG: Image paste detected for HtmlEditor, letting internal JS handle it.")
+                # We still need to handle potential text pasting if image handling fails or isn't triggered in JS
+                # However, the JS prevents default, so this path might not be reached for images.
+                # If there's also text, let the standard text paste happen below.
+                pass # Explicitly do nothing for image pasting here
+            # Check if it's _InternalTextEdit (which now inherits ResizableImageTextEdit)
             elif isinstance(editor, _InternalTextEdit):
-                print("DEBUG: Pasting image into _InternalTextEdit using insertHtml")
-                # Use insertHtml to render the image
-                cursor = editor.textCursor()
-                cursor.insertHtml(f'<img src="{data_url}" alt="Clipboard Image"/>')
-                if hasattr(editor, 'document'): editor.document().setModified(True)
+                print("DEBUG: Delegating image paste to _InternalTextEdit (ResizableImageTextEdit)")
+                # Let the editor handle the paste via its overridden insertFromMimeData
+                editor.paste()
+                # The editor's insertFromMimeData should handle setting modified state if needed.
             else:
-                 # This block should ideally not be reached now
-                 print(f"Pasting image not supported for this editor type: {type(editor)}")
+                 # Fallback for unknown editor types
+                 print(f"Pasting image not directly supported for this editor type: {type(editor)}")
+                 # If it's not HtmlEditor or _InternalTextEdit, try standard paste if text exists
                  if mime.hasText():
                      if hasattr(editor, 'paste'): editor.paste()
-            return # Image handled (or attempted)
-
-        # 2) 否则，如果剪贴板有文本
-        elif mime.hasText():
-            print(f"DEBUG: Pasting text into editor type: {type(editor)}") # Debug print
-            if hasattr(editor, 'paste'):
-                 editor.paste()
-            else:
-                 print(f"Standard paste not supported for editor type: {type(editor)}")
-        else:
-             print("Clipboard contains neither image nor text.")
 
     def select_all_action_handler(self):
         """全选操作"""
