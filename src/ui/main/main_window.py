@@ -160,6 +160,12 @@ class MainWindow(QMainWindow):
         self.insert_image_action = QAction("插入图片...", self, toolTip="在光标处插入图片", triggered=self.insert_image_wrapper, enabled=False) # Depends on editor type
         self.find_action = QAction("查找", self, shortcut="Ctrl+F", toolTip="在当前文件中查找文本 (Ctrl+F)", triggered=self.find_text_wrapper, enabled=False)
         self.replace_action = QAction("替换", self, shortcut="Ctrl+H", toolTip="在当前文件中查找并替换文本 (Ctrl+H)", triggered=self.replace_text_wrapper, enabled=False)
+        
+        # 添加翻译相关操作
+        self.translate_action = QAction("翻译...", self, shortcut="Ctrl+Shift+T", toolTip="打开翻译对话框 (Ctrl+Shift+T)", 
+                                      triggered=self.open_translation_dialog_wrapper, enabled=True)
+        self.translate_selection_action = QAction("翻译选中内容", self, toolTip="翻译选中的文本", 
+                                                triggered=self.translate_selection_wrapper, enabled=False)
 
         self.toggle_theme_action = QAction("切换主题", self, shortcut="Ctrl+T", toolTip="切换亮色/暗色主题 (Ctrl+T)", triggered=self.toggle_theme_wrapper)
         self.zen_action = QAction("Zen Mode", self, checkable=True, shortcut="F11", triggered=self.toggle_zen_mode_wrapper, toolTip="进入/退出 Zen 模式 (F11)")
@@ -187,6 +193,8 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.select_all_action)
         edit_menu.addSeparator()
         edit_menu.addActions([self.find_action, self.replace_action])
+        edit_menu.addSeparator()
+        edit_menu.addActions([self.translate_action, self.translate_selection_action])
 
         format_menu = menu_bar.addMenu("格式")
         format_menu.addActions([self.font_action, self.color_action])
@@ -221,6 +229,8 @@ class MainWindow(QMainWindow):
         self.toolbar.addActions([self.undo_action, self.redo_action])
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.find_action)
+        self.toolbar.addSeparator()
+        self.toolbar.addAction(self.translate_action)
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -231,23 +241,30 @@ class MainWindow(QMainWindow):
         menu_btn.setToolTip("更多选项")
         menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         more_menu = QMenu(menu_btn)
-        # ... (Add submenus and actions as before) ...
+        
         file_submenu = more_menu.addMenu("文件")
         file_submenu.addActions([self.save_as_action, self.close_tab_action])
         file_submenu.addSeparator()
         file_submenu.addAction(self.exit_action)
+        
         edit_submenu = more_menu.addMenu("编辑")
         edit_submenu.addActions([self.cut_action, self.copy_action, self.paste_action, self.select_all_action])
         edit_submenu.addSeparator()
         edit_submenu.addAction(self.replace_action)
+        edit_submenu.addSeparator()
+        edit_submenu.addAction(self.translate_selection_action)
+        
         format_submenu = more_menu.addMenu("格式")
         format_submenu.addActions([self.font_action, self.color_action, self.insert_image_action])
+        
         view_submenu = more_menu.addMenu("视图")
         view_submenu.addAction(self.toggle_theme_action)
         view_submenu.addSeparator()
         view_submenu.addAction(self.zen_action)
+        
         help_submenu = more_menu.addMenu("帮助")
         help_submenu.addAction(self.about_action)
+        
         menu_btn.setMenu(more_menu)
         self.toolbar.addWidget(menu_btn)
 
@@ -279,6 +296,17 @@ class MainWindow(QMainWindow):
     def toggle_zen_mode_wrapper(self, checked): self.view_operations.toggle_zen_mode(checked)
     # def toggle_sidebar_wrapper(self): self.view_operations.toggle_sidebar() # If action exists
     def show_about_wrapper(self): self.view_operations.show_about()
+
+    # --- Translation Operations Wrappers ---
+    def open_translation_dialog_wrapper(self):
+        """打开翻译对话框的包装方法"""
+        if hasattr(self, 'edit_operations'):
+            self.edit_operations.open_translation_dialog()
+            
+    def translate_selection_wrapper(self):
+        """翻译选中文本的包装方法"""
+        if hasattr(self, 'edit_operations'):
+            self.edit_operations.translate_selection()
 
     # --- Core MainWindow Logic ---
     def get_current_editor_widget(self) -> QWidget | None:
@@ -370,88 +398,74 @@ class MainWindow(QMainWindow):
         self.cut_action.setEnabled(available)
 
     def update_edit_actions_state(self, current_widget: QWidget | None):
-        """Updates the enabled state of edit actions based on the current widget."""
-        # --- 1. Disconnect previous editor signals ---
-        if self.previous_editor and hasattr(self.previous_editor, 'document'):
-            prev_doc = self.previous_editor.document()
-            prev_copy_signal = None
-            if hasattr(self.previous_editor, 'copyAvailable'):
-                 prev_copy_signal = self.previous_editor.copyAvailable
-                 if callable(prev_copy_signal): prev_copy_signal = prev_copy_signal()
-            try: prev_doc.undoAvailable.disconnect(self.undo_action.setEnabled)
-            except TypeError: pass
-            try: prev_doc.redoAvailable.disconnect(self.redo_action.setEnabled)
-            except TypeError: pass
-            if prev_copy_signal:
-                 try: prev_copy_signal.disconnect(self._update_copy_cut_state)
-                 except TypeError: pass
-            try: prev_doc.modificationChanged.disconnect(self.update_tab_title)
-            except TypeError: pass
-        self.previous_editor = None # Reset previous editor reference
-
-        # --- 2. Determine states based on current_widget ---
+        """更新编辑操作的启用状态"""
+        is_editor = False
+        can_do_undo_redo = False
+        is_writable = False
+        
+        # This no-op check is to avoid crashes if there's no editor widget
+        if current_widget is None:
+            for action in [self.undo_action, self.redo_action, self.cut_action,
+                          self.copy_action, self.select_all_action,
+                          self.font_action, self.color_action, self.insert_image_action,
+                          self.find_action, self.replace_action, self.save_action,
+                          self.save_as_action, self.close_tab_action,
+                          self.translate_selection_action]:
+                action.setEnabled(False)
+            return
+            
+        # Check if widget is TextEditor or HtmlEditor (via the ui_manager)
         is_editor = self.ui_manager.is_widget_editor(current_widget)
-        is_html_editor = self.ui_manager.is_widget_html_editor(current_widget)
-        is_undoable = False
-        is_redoable = False
+        is_writable = True  # For now we assume editors are writable. Could add a check later.
+
+        # If this is a text/html editor, check if document exists and has modification capabilities
+        if is_editor:
+            can_do_undo_redo = True
+            if hasattr(current_widget, 'document') and callable(current_widget.document):
+                doc = current_widget.document()
+                if doc and hasattr(doc, 'isRedoAvailable'):
+                    # Enable/disable Undo/Redo based on document state
+                    self.undo_action.setEnabled(doc.isUndoAvailable())
+                    self.redo_action.setEnabled(doc.isRedoAvailable())
+                    # Need to enable Save only if document is modified
+                    if hasattr(doc, 'isModified'):
+                        self.save_action.setEnabled(doc.isModified() and is_writable)
+                    # Flag that we've handled undo/redo state
+                    can_do_undo_redo = False
+                    
+        # Default undo/redo enable state if we couldn't check document state
+        if can_do_undo_redo:
+            self.undo_action.setEnabled(True)
+            self.redo_action.setEnabled(True)
+            
+        # Text selection state directly links to cut/copy/translate-selection actions
         has_selection = False
-        # Qt6: 通过 mimeData().hasText() 判断剪贴板中是否有文本 (Applying user patch)
-        can_paste = QApplication.clipboard().mimeData().hasText()
-
-        # 只有当 widget 真正支持 document() 和 textCursor() 时，才当作纯文本编辑器处理 (Applying user patch)
-        if is_editor and hasattr(current_widget, "document") and hasattr(current_widget, "textCursor"):
-            # We know current_widget is not None here and is an editor
-            editor_doc = current_widget.document()
-            editor_cursor = current_widget.textCursor()
-            copy_available_signal = None
-            if hasattr(current_widget, 'copyAvailable'):
-                copy_available_signal = current_widget.copyAvailable
-                if callable(copy_available_signal): copy_available_signal = copy_available_signal()
-
-            # … 以下保持原逻辑，计算 undo/redo/选区状态、连接信号等 …
-            # Determine editor-specific states
-            has_selection = editor_cursor is not None and editor_cursor.hasSelection()
-            is_undoable = editor_doc is not None and editor_doc.isUndoAvailable()
-            is_redoable = editor_doc is not None and editor_doc.isRedoAvailable()
-
-            # --- 3. Connect signals for the new editor ---
-            try: editor_doc.undoAvailable.connect(self.undo_action.setEnabled)
-            except TypeError: pass
-            try: editor_doc.redoAvailable.connect(self.redo_action.setEnabled)
-            except TypeError: pass
-            if copy_available_signal:
-                 try: copy_available_signal.connect(self._update_copy_cut_state)
-                 except TypeError: pass
-            try: editor_doc.modificationChanged.connect(self.update_tab_title)
-            except TypeError: pass
-            self.previous_editor = current_widget # Set the new previous editor
-        else:
-            # 非文本编辑器（比如 HtmlEditor），不执行 document/cursor 相关操作
-            # is_editor     = False # REMOVE THIS LINE - Don't override is_editor here
-            editor_doc    = None
-            editor_cursor = None
-            # has_selection, is_undoable, is_redoable 均保持 False
-            # 后面会根据 is_editor = False 自动关闭这些动作
-
-        # --- 4. Update action states ---
-        self.undo_action.setEnabled(is_undoable)
-        self.redo_action.setEnabled(is_redoable)
-        self.cut_action.setEnabled(has_selection)
-        self.copy_action.setEnabled(has_selection)
-        # 粘贴操作由 EditOperations.paste 内部判断图片/文本，菜单始终可用
-        self.paste_action.setEnabled(True)
+        if current_widget is not None and hasattr(current_widget, 'textCursor'):
+            cursor = current_widget.textCursor()
+            if cursor:
+                has_selection = cursor.hasSelection()
+                
+        self._update_copy_cut_state(has_selection)
+        # Update translate selection action too
+        self.translate_selection_action.setEnabled(has_selection)
+                
+        # Enable actions that require editor existence but no selection
         self.select_all_action.setEnabled(is_editor)
-        self.font_action.setEnabled(is_editor)
-        self.color_action.setEnabled(is_editor)
-        # 只有当前标签是真正的 HtmlEditor 时，才启用“插入图片”
-        is_html = self.ui_manager.is_widget_html_editor(current_widget)
-        self.insert_image_action.setEnabled(is_html)
-        self.save_action.setEnabled(is_editor)
-        self.save_as_action.setEnabled(is_editor)
-        # Close tab action depends only on whether tabs exist
-        self.close_tab_action.setEnabled(self.ui_manager.tab_widget.count() > 0 if self.ui_manager.tab_widget else False)
         self.find_action.setEnabled(is_editor)
         self.replace_action.setEnabled(is_editor)
+        
+        # Save/Save As/Close tab
+        self.save_as_action.setEnabled(is_editor and is_writable)
+        # Tab must exist to close it. save_action is updated above with document.isModified
+        # But if we can't check modification state, we'll enable it if writable
+        self.close_tab_action.setEnabled(True)
+        
+        # Font and color actions can be used regardless of selection
+        self.font_action.setEnabled(is_editor)
+        self.color_action.setEnabled(is_editor)
+        # 只有当前标签是真正的 HtmlEditor 时，才启用"插入图片"
+        is_html = self.ui_manager.is_widget_html_editor(current_widget)
+        self.insert_image_action.setEnabled(is_html)
 
 
     def update_window_title(self):

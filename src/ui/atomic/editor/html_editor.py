@@ -39,6 +39,9 @@ class HtmlEditor(QWebEngineView):
         self._untitled_name = None
         # PDF related state removed, should be managed elsewhere if needed
 
+        # 设置JavaScript消息处理器
+        self.page().javaScriptConsoleMessage = self._handle_js_console_message
+
         # Set initial blank page or content (removed contenteditable)
         self.setHtml("<!DOCTYPE html><html><head></head><body></body></html>")
         self.setModified(False) # Start unmodified
@@ -46,6 +49,16 @@ class HtmlEditor(QWebEngineView):
         # Connect load finished signal to potentially run setup JS
         self.page().loadFinished.connect(self._on_load_finished)
 
+    def _handle_js_console_message(self, level, message, line, source_id):
+        """处理JavaScript控制台消息"""
+        # 日志级别：0=Info, 1=Warning, 2=Error
+        if level > 0:  # 只记录警告和错误
+            print(f"JS {['Info', 'Warning', 'Error'][level]} ({source_id}:{line}): {message}")
+            
+        # 检查是否为翻译事件相关消息
+        if "translateText" in message:
+            print(f"译事件触发: {message}")
+            
     def _on_load_finished(self, ok):
         """Run JavaScript after the page finishes loading."""
         if ok:
@@ -57,6 +70,8 @@ class HtmlEditor(QWebEngineView):
             self._inject_paste_handler()
             # Inject the context menu handler script
             self._inject_context_menu_handler()
+            # 注入翻译事件监听器
+            self._inject_translation_listener()
             # print("HtmlEditor _on_load_finished: Enabled designMode, attempted focus, and injected handlers.") # Debug
 
     def _inject_paste_handler(self):
@@ -154,53 +169,230 @@ class HtmlEditor(QWebEngineView):
         self.run_js(script)
 
     def _inject_context_menu_handler(self):
-        """Injects JavaScript to handle right-click resizing for images."""
+        """Injects JavaScript to handle right-click context menu with custom options."""
         script = """
         (function() {
-            document.body.addEventListener('contextmenu', function(event) {
+            document.addEventListener('contextmenu', function(event) {
+                // 获取选中的文本
+                const selectedText = window.getSelection().toString().trim();
+                
+                // 检查是否点击在图片上
                 const target = event.target;
-                if (target.tagName === 'IMG') {
-                    event.preventDefault(); // Prevent default context menu
-
-                    const currentWidth = target.width;
-                    const originalWidth = target.naturalWidth; // Get original width
-                    const originalHeight = target.naturalHeight; // Get original height
-
-                    // Use prompt for simplicity, a custom dialog would be better UX
-                    const newWidthStr = prompt(`调整图片大小 - 输入新的宽度 (像素):\\n当前宽度: ${currentWidth}px`, currentWidth);
-
-                    if (newWidthStr !== null) { // Check if user pressed Cancel
-                        const newWidth = parseInt(newWidthStr, 10);
-                        if (!isNaN(newWidth) && newWidth > 0 && originalWidth > 0) {
-                            // Calculate new height based on original aspect ratio
-                            const aspectRatio = originalHeight / originalWidth;
-                            const newHeight = Math.round(newWidth * aspectRatio);
-
-                            if (newHeight > 0) {
-                                target.width = newWidth;
-                                target.height = newHeight;
-                                // Optionally signal modification back to Python
-                                // window.qt_bridge.setModified(true); // If a bridge exists
-                            } else {
-                                alert("错误: 计算出的高度无效。");
-                            }
-                        } else if (newWidth <= 0) {
-                             alert("错误: 宽度必须大于 0。");
-                        } else if (isNaN(newWidth)) {
-                             alert("错误: 请输入有效的数字宽度。");
-                        } else {
-                             alert("错误: 无法获取原始图片尺寸。");
-                        }
-                    }
+                const isImage = target.tagName === 'IMG';
+                
+                // 如果没有选中文本且不是图片，则使用默认上下文菜单
+                if (!selectedText && !isImage) {
+                    return;
                 }
-                // Allow default context menu for other elements
+                
+                // 阻止默认上下文菜单
+                event.preventDefault();
+                
+                // 创建自定义菜单
+                const customMenu = document.createElement('div');
+                customMenu.className = 'html-editor-context-menu';
+                customMenu.style.position = 'absolute';
+                customMenu.style.top = event.clientY + 'px';
+                customMenu.style.left = event.clientX + 'px';
+                customMenu.style.backgroundColor = '#ffffff';
+                customMenu.style.border = '1px solid #ccc';
+                customMenu.style.boxShadow = '2px 2px 5px rgba(0,0,0,0.3)';
+                customMenu.style.padding = '5px 0';
+                customMenu.style.borderRadius = '4px';
+                customMenu.style.zIndex = '1000';
+                
+                // 为图片添加调整大小选项
+                if (isImage) {
+                    const resizeOption = document.createElement('div');
+                    resizeOption.className = 'menu-item';
+                    resizeOption.textContent = '调整图片大小';
+                    resizeOption.style.padding = '5px 15px';
+                    resizeOption.style.cursor = 'pointer';
+                    resizeOption.style.hover = 'background-color: #f0f0f0';
+                    
+                    resizeOption.addEventListener('click', function() {
+                        customMenu.remove(); // 关闭菜单
+                        
+                        const currentWidth = target.width;
+                        const originalWidth = target.naturalWidth;
+                        const originalHeight = target.naturalHeight;
+                        
+                        const newWidthStr = prompt(`调整图片大小 - 输入新的宽度 (像素):\\n当前宽度: ${currentWidth}px`, currentWidth);
+                        
+                        if (newWidthStr !== null) {
+                            const newWidth = parseInt(newWidthStr, 10);
+                            if (!isNaN(newWidth) && newWidth > 0 && originalWidth > 0) {
+                                const aspectRatio = originalHeight / originalWidth;
+                                const newHeight = Math.round(newWidth * aspectRatio);
+                                
+                                if (newHeight > 0) {
+                                    target.width = newWidth;
+                                    target.height = newHeight;
+                                } else {
+                                    alert("错误: 计算出的高度无效。");
+                                }
+                            } else if (newWidth <= 0) {
+                                alert("错误: 宽度必须大于 0。");
+                            } else if (isNaN(newWidth)) {
+                                alert("错误: 请输入有效的数字宽度。");
+                            } else {
+                                alert("错误: 无法获取原始图片尺寸。");
+                            }
+                        }
+                    });
+                    
+                    customMenu.appendChild(resizeOption);
+                }
+                
+                // 如果有选中文本，添加翻译选项
+                if (selectedText) {
+                    const translateOption = document.createElement('div');
+                    translateOption.className = 'menu-item';
+                    translateOption.textContent = '翻译选中内容';
+                    translateOption.style.padding = '5px 15px';
+                    translateOption.style.cursor = 'pointer';
+                    translateOption.style.hover = 'background-color: #f0f0f0';
+                    
+                    translateOption.addEventListener('click', function() {
+                        customMenu.remove(); // 关闭菜单
+                        
+                        // 通过QWebChannel调用Python中的翻译方法
+                        // 使用异步方式安全地调用Python侧方法
+                        const callbackFunction = function() {
+                            if (window.qt && window.qt.webChannelTransport) {
+                                // 触发全局事件，让Python端处理
+                                const event = new CustomEvent('translateText', {
+                                    detail: { text: selectedText }
+                                });
+                                document.dispatchEvent(event);
+                            } else {
+                                console.error("Qt WebChannel未设置，无法调用翻译方法");
+                                alert("无法连接到翻译功能，请通过菜单栏使用翻译功能。");
+                            }
+                        };
+                        
+                        // 使用setTimeout确保UI先更新
+                        setTimeout(callbackFunction, 10);
+                    });
+                    
+                    customMenu.appendChild(translateOption);
+                }
+                
+                // 添加剪切、复制、粘贴等通用选项
+                if (selectedText) {
+                    const copyOption = document.createElement('div');
+                    copyOption.className = 'menu-item';
+                    copyOption.textContent = '复制';
+                    copyOption.style.padding = '5px 15px';
+                    copyOption.style.cursor = 'pointer';
+                    
+                    copyOption.addEventListener('click', function() {
+                        customMenu.remove(); // 关闭菜单
+                        document.execCommand('copy');
+                    });
+                    
+                    const cutOption = document.createElement('div');
+                    cutOption.className = 'menu-item';
+                    cutOption.textContent = '剪切';
+                    cutOption.style.padding = '5px 15px';
+                    cutOption.style.cursor = 'pointer';
+                    
+                    cutOption.addEventListener('click', function() {
+                        customMenu.remove(); // 关闭菜单
+                        document.execCommand('cut');
+                    });
+                    
+                    if (customMenu.childElementCount > 0) {
+                        customMenu.appendChild(document.createElement('hr'));
+                    }
+                    customMenu.appendChild(copyOption);
+                    customMenu.appendChild(cutOption);
+                }
+                
+                // 添加菜单项分隔线和样式
+                const menuItems = customMenu.querySelectorAll('.menu-item');
+                menuItems.forEach(item => {
+                    item.addEventListener('mouseover', function() {
+                        this.style.backgroundColor = '#f0f0f0';
+                    });
+                    item.addEventListener('mouseout', function() {
+                        this.style.backgroundColor = 'transparent';
+                    });
+                });
+                
+                // 点击页面其他地方关闭菜单
+                const closeMenu = function(e) {
+                    if (!customMenu.contains(e.target)) {
+                        customMenu.remove();
+                        document.removeEventListener('click', closeMenu);
+                    }
+                };
+                
+                // 添加菜单到页面
+                document.body.appendChild(customMenu);
+                document.addEventListener('click', closeMenu);
             });
-            // console.log("Context menu handler injected."); // Debug
         })();
         """
-        # Escape curly braces for f-string if needed (not needed here as it's a plain string)
         self.run_js(script)
 
+    def _inject_translation_listener(self):
+        """注入JavaScript代码监听翻译事件"""
+        script = """
+        (function() {
+            document.addEventListener('translateText', function(event) {
+                if (event.detail && event.detail.text) {
+                    const text = event.detail.text;
+                    console.log('translateText event received with text: ' + text);
+                    
+                    // 将翻译请求传递到Python
+                    if (window.navigator) {
+                        // 使用用户代理来触发Python端的检测
+                        const originalUserAgent = window.navigator.userAgent;
+                        window.navigator.userAgent = 'TRANSLATE_REQUEST:' + text;
+                        setTimeout(function() {
+                            window.navigator.userAgent = originalUserAgent;
+                        }, 10);
+                    }
+                }
+            });
+            console.log('Translation event listener installed');
+        })();
+        """
+        self.run_js(script)
+
+    def userAgentForUrl(self, url):
+        """重写userAgentForUrl方法来捕获JavaScript传递的翻译请求"""
+        user_agent = super().userAgentForUrl(url)
+        
+        # 检查是否包含翻译请求标记
+        if user_agent.startswith('TRANSLATE_REQUEST:'):
+            text = user_agent[18:]  # 提取文本内容
+            # 延迟调用以避免在事件处理期间修改UI
+            QTimer.singleShot(0, lambda: self._handle_translation_request(text))
+            
+        return user_agent
+    
+    def _handle_translation_request(self, text):
+        """处理来自JavaScript的翻译请求"""
+        # 查找主窗口
+        parent = self.parent()
+        main_window = None
+        while parent:
+            if parent.__class__.__name__ == 'MainWindow':
+                main_window = parent
+                break
+            parent = parent.parent()
+            
+        # 调用主窗口的翻译方法
+        if main_window and hasattr(main_window, 'translate_selection_wrapper'):
+            # 先设置选中文本到剪贴板
+            from PyQt6.QtWidgets import QApplication
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+            
+            # 调用翻译方法
+            main_window.translate_selection_wrapper()
 
     def run_js(self, script: str, callback=None):
         """Executes JavaScript code in the context of the page."""

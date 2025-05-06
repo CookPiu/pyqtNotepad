@@ -1,11 +1,15 @@
 import base64 # For image pasting
 from PyQt6.QtWidgets import QInputDialog, QMessageBox, QFileDialog, QApplication # Add QApplication
 from PyQt6.QtGui import QTextCursor
-from PyQt6.QtCore import QUrl, QBuffer, QByteArray # Add QBuffer, QByteArray
+from PyQt6.QtCore import QUrl, QBuffer, QByteArray, Qt # Add QBuffer, QByteArray
 from src.services.format_service import FormatService
 # Import editor types for direct checking
 from ..atomic.editor.html_editor import HtmlEditor
 from ..atomic.editor.text_editor import _InternalTextEdit # Import the internal class
+import os
+
+# 替换翻译对话框导入为可拖拽的翻译窗口
+from ..docks.translation_dock import TranslationDockWidget
 
 class EditOperations:
     """处理MainWindow的编辑操作功能"""
@@ -14,6 +18,13 @@ class EditOperations:
         self.main_window = main_window
         self.ui_manager = ui_manager # Store ui_manager
         self.format_service = FormatService(main_window) # FormatService might need ui_manager later?
+        
+        # 创建翻译窗口（但不显示）
+        self.translation_dock = None
+        
+        # 连接编辑器变化信号
+        if hasattr(self.main_window, 'current_editor_changed'):
+            self.main_window.current_editor_changed.connect(self.connect_editor_signals)
 
     # --- 基本编辑操作 ---
     def undo_action_handler(self):
@@ -261,3 +272,110 @@ class EditOperations:
             if hasattr(editor, 'document'): editor.document().setModified(True)
         else:
             if hasattr(self.main_window, 'statusBar'): self.main_window.statusBar().showMessage(f"未找到要替换的文本: {find_text}", 3000)
+
+    # --- 翻译操作 ---
+    def close_translation_dock(self):
+        """关闭翻译窗口"""
+        if self.translation_dock and self.translation_dock.isVisible():
+            self.translation_dock.close()
+            
+    def open_translation_dialog(self):
+        """打开翻译窗口"""
+        # 如果翻译窗口尚未创建，创建它
+        if not self.translation_dock:
+            self.translation_dock = TranslationDockWidget(self.main_window)
+            self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.translation_dock)
+            
+            # 设置初始大小
+            self.translation_dock.resize(500, 400)
+            
+            # 连接信号，当窗口关闭时执行清理操作
+            self.translation_dock.visibilityChanged.connect(self._on_translation_dock_visibility_changed)
+        
+        # 获取当前选中的文本
+        editor = self.main_window.get_current_editor_widget()
+        selected_text = ""
+        
+        if editor and hasattr(editor, 'textCursor'):
+            cursor = editor.textCursor()
+            if cursor.hasSelection():
+                selected_text = cursor.selectedText()
+                self.translation_dock.set_text(selected_text)
+        
+        # 显示翻译窗口
+        self.translation_dock.show()
+        self.translation_dock.raise_()
+        
+    def _on_translation_dock_visibility_changed(self, visible):
+        """翻译窗口可见性变化时的处理"""
+        if not visible and self.translation_dock:
+            # 当窗口隐藏时，重置一些状态
+            print("翻译窗口已关闭")
+        
+    def connect_editor_signals(self, editor):
+        """连接编辑器的信号，以便在文本选择变化时通知翻译窗口"""
+        if not editor:
+            return
+            
+        # 如果翻译窗口已创建并且可见，则处理选中文本实时更新
+        if self.translation_dock and self.translation_dock.isVisible():
+            if isinstance(editor, HtmlEditor):
+                # 对于HTML编辑器，我们通过轮询选择状态来处理
+                pass  # HTML编辑器的选择通过TranslationDockWidget的定时器自动处理
+            elif hasattr(editor, 'selectionChanged'):
+                # 标准编辑器（如QTextEdit基类）可以直接连接selectionChanged信号
+                try:
+                    # 尝试断开之前的连接（如果有）以避免多次连接
+                    try:
+                        editor.selectionChanged.disconnect()
+                    except:
+                        pass  # 如果没有连接，会抛出异常，我们忽略它
+                        
+                    # 连接新的信号
+                    editor.selectionChanged.connect(self._on_selection_changed)
+                except Exception as e:
+                    print(f"无法连接选择变化信号: {e}")
+    
+    def _on_selection_changed(self):
+        """处理编辑器选择变化"""
+        if not self.translation_dock or not self.translation_dock.isVisible():
+            return
+            
+        editor = self.main_window.get_current_editor_widget()
+        if not editor or not hasattr(editor, 'textCursor'):
+            return
+            
+        cursor = editor.textCursor()
+        if cursor.hasSelection():
+            selected_text = cursor.selectedText()
+            if selected_text and selected_text.strip():
+                # 设置到翻译窗口
+                self.translation_dock.set_text(selected_text)
+
+    def translate_selection(self):
+        """直接翻译选中文本"""
+        editor = self.main_window.get_current_editor_widget()
+        selected_text = ""
+        
+        # 检查编辑器中是否有选中文本
+        if editor and hasattr(editor, 'textCursor'):
+            cursor = editor.textCursor()
+            if cursor.hasSelection():
+                selected_text = cursor.selectedText()
+        
+        # 如果没有选中文本，检查剪贴板是否有文本（用于HtmlEditor）
+        if not selected_text:
+            clipboard = QApplication.clipboard()
+            mime_data = clipboard.mimeData()
+            if mime_data.hasText():
+                selected_text = mime_data.text()
+                
+        # 如果仍然没有文本可供翻译，显示错误消息
+        if not selected_text or not selected_text.strip():
+            if hasattr(self.main_window, 'statusBar'):
+                self.main_window.statusBar().showMessage("请先选择要翻译的文本。", 3000)
+            return
+            
+        # 打开翻译窗口并设置文本
+        self.open_translation_dialog()
+        self.translation_dock.set_text(selected_text)

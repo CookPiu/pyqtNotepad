@@ -244,6 +244,17 @@ class _InternalTextEdit(ResizableImageTextEdit):
         select_all_action = menu.addAction("全选")
         select_all_action.setEnabled(True)
         select_all_action.triggered.connect(self.selectAll)
+        
+        # 添加翻译选项，只有在有选中文本时才启用
+        has_selection = self.textCursor().hasSelection()
+        if has_selection:
+            menu.addSeparator()
+            translate_action = menu.addAction("翻译选中内容")
+            translate_action.setEnabled(True)
+            if main_window and hasattr(main_window, 'translate_selection_wrapper'):
+                translate_action.triggered.connect(main_window.translate_selection_wrapper)
+            else:
+                print("Warning: Could not connect translate action to MainWindow's logic.")
 
         menu.exec(event.globalPos())
 
