@@ -53,7 +53,154 @@ class HtmlEditor(QWebEngineView):
             # self.apply_theme_js(is_dark=False) # Apply default theme
             # Enable designMode and try focusing body
             self.run_js("document.designMode = 'on'; document.body.focus();")
-            # print("HtmlEditor _on_load_finished: Enabled designMode and attempted focus.") # Debug
+            # Inject the paste handler script
+            self._inject_paste_handler()
+            # Inject the context menu handler script
+            self._inject_context_menu_handler()
+            # print("HtmlEditor _on_load_finished: Enabled designMode, attempted focus, and injected handlers.") # Debug
+
+    def _inject_paste_handler(self):
+        """Injects JavaScript to handle image pasting with resizing."""
+        # Max width for pasted images
+        max_width = 200
+        
+        # Escape curly braces for the f-string by doubling them {{ }}
+        # Add console logs for debugging
+        script = f"""
+        (function() {{
+            console.log("Attempting to inject paste handler for HTML editor.");
+            document.body.addEventListener('paste', function(event) {{
+                console.log("Paste event triggered in HTML editor.");
+                const items = (event.clipboardData || window.clipboardData).items;
+                let imageFound = false;
+
+                if (!items) {{
+                    console.log("Paste event: No clipboard items found.");
+                    return; // Exit if no items
+                }}
+                console.log(`Paste event: Found ${{items.length}} clipboard items.`);
+
+                for (let i = 0; i < items.length; i++) {{
+                    console.log(`Item ${{i}}: kind=${{items[i].kind}}, type=${{items[i].type}}`);
+                    if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {{
+                        console.log("Image file found in clipboard. Preventing default paste.");
+                        event.preventDefault(); // Stop default paste
+                        imageFound = true;
+                        const file = items[i].getAsFile();
+                        if (!file) {{
+                            console.error("Could not get file from clipboard item.");
+                            continue; // Try next item
+                        }}
+                        const reader = new FileReader();
+
+                        reader.onload = function(e) {{
+                            console.log("FileReader onload triggered.");
+                            const dataUrl = e.target.result;
+                            if (!dataUrl) {{
+                                console.error("FileReader result (dataUrl) is empty.");
+                                return;
+                            }}
+                            const tempImg = new Image();
+                            tempImg.onload = function() {{
+                                console.log("Temporary image loaded from dataUrl.");
+                                const originalWidth = tempImg.naturalWidth;
+                                const originalHeight = tempImg.naturalHeight;
+                                console.log(`Original image size: ${{originalWidth}}x${{originalHeight}}`);
+                                let targetWidth = originalWidth;
+                                let targetHeight = originalHeight;
+                                const maxWidth = {max_width}; // Use Python variable
+
+                                if (originalWidth > maxWidth) {{
+                                    const ratio = maxWidth / originalWidth;
+                                    targetWidth = maxWidth;
+                                    targetHeight = Math.round(originalHeight * ratio);
+                                    console.log(`Resizing image to: ${{targetWidth}}x${{targetHeight}}`);
+                                }} else {{
+                                     console.log("Image width is within limit, using original size.");
+                                }}
+
+                                // Escape curly braces in the generated HTML string for the f-string
+                                const imgHtml = `<img src="${{{{dataUrl}}}}" width="${{{{targetWidth}}}}" height="${{{{targetHeight}}}}">`;
+                                console.log("Inserting HTML:", imgHtml);
+                                // Use execCommand to insert HTML at cursor position
+                                try {{
+                                    const success = document.execCommand('insertHTML', false, imgHtml);
+                                    console.log(`document.execCommand('insertHTML') success: ${{success}}`);
+                                    // Optionally, try to signal modification back to Python if needed
+                                    // window.qt_bridge.setModified(true); // If a bridge exists
+                                }} catch (err) {{
+                                     console.error("Error executing insertHTML:", err);
+                                }}
+                            }};
+                            tempImg.onerror = function() {{
+                                console.error("Error loading temporary image from dataUrl.");
+                            }};
+                            tempImg.src = dataUrl;
+                        }};
+                        reader.onerror = function() {{
+                             console.error("FileReader error reading file.");
+                        }};
+                        reader.readAsDataURL(file);
+                        break; // Handle only the first image found
+                    }}
+                }}
+                if (!imageFound) {{
+                    console.log("No image file found in paste event, allowing default paste.");
+                }}
+            }});
+            console.log("Paste handler successfully injected for HTML editor.");
+        }})();
+        """
+        self.run_js(script)
+
+    def _inject_context_menu_handler(self):
+        """Injects JavaScript to handle right-click resizing for images."""
+        script = """
+        (function() {
+            document.body.addEventListener('contextmenu', function(event) {
+                const target = event.target;
+                if (target.tagName === 'IMG') {
+                    event.preventDefault(); // Prevent default context menu
+
+                    const currentWidth = target.width;
+                    const originalWidth = target.naturalWidth; // Get original width
+                    const originalHeight = target.naturalHeight; // Get original height
+
+                    // Use prompt for simplicity, a custom dialog would be better UX
+                    const newWidthStr = prompt(`调整图片大小 - 输入新的宽度 (像素):\\n当前宽度: ${currentWidth}px`, currentWidth);
+
+                    if (newWidthStr !== null) { // Check if user pressed Cancel
+                        const newWidth = parseInt(newWidthStr, 10);
+                        if (!isNaN(newWidth) && newWidth > 0 && originalWidth > 0) {
+                            // Calculate new height based on original aspect ratio
+                            const aspectRatio = originalHeight / originalWidth;
+                            const newHeight = Math.round(newWidth * aspectRatio);
+
+                            if (newHeight > 0) {
+                                target.width = newWidth;
+                                target.height = newHeight;
+                                // Optionally signal modification back to Python
+                                // window.qt_bridge.setModified(true); // If a bridge exists
+                            } else {
+                                alert("错误: 计算出的高度无效。");
+                            }
+                        } else if (newWidth <= 0) {
+                             alert("错误: 宽度必须大于 0。");
+                        } else if (isNaN(newWidth)) {
+                             alert("错误: 请输入有效的数字宽度。");
+                        } else {
+                             alert("错误: 无法获取原始图片尺寸。");
+                        }
+                    }
+                }
+                // Allow default context menu for other elements
+            });
+            // console.log("Context menu handler injected."); // Debug
+        })();
+        """
+        # Escape curly braces for f-string if needed (not needed here as it's a plain string)
+        self.run_js(script)
+
 
     def run_js(self, script: str, callback=None):
         """Executes JavaScript code in the context of the page."""

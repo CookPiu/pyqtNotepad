@@ -7,6 +7,8 @@ from PyQt6.QtCore import Qt, QRect, QPointF, pyqtSignal, QPoint, QEvent, QTimer 
 
 # Correct relative import from atomic/editor to core
 from ...core.base_widget import BaseWidget
+# Import the custom ResizableImageTextEdit
+from .resizable_image_text_edit import ResizableImageTextEdit
 # Assuming ThemeManager might be needed later, e.g., for direct access
 # from ...core.theme_manager import ThemeManager # Or get_theme_manager()
 
@@ -75,9 +77,9 @@ class LineNumberArea(QWidget):
 
 
 # --- Internal QTextEdit class ---
-# Changed base class from QPlainTextEdit to QTextEdit
-class _InternalTextEdit(QTextEdit):
-    """The actual QTextEdit implementation with line numbers and highlighting."""
+# Change base class from QTextEdit to ResizableImageTextEdit
+class _InternalTextEdit(ResizableImageTextEdit):
+    """The actual QTextEdit implementation with line numbers and highlighting, now with image resizing."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFrameStyle(QFrame.Shape.NoFrame)
