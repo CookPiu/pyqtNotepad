@@ -1,0 +1,23 @@
+{
+  "name": "pyqtnotepad",
+  "version": "1.0.0",
+  "description": "这是一个使用 PyQt6 框架构建的多功能记事本应用程序，旨在提供一个集成化的笔记、工具和文件管理环境。",
+  "homepage": "https://github.com/CookPiu/pyqtNotepad#readme",
+  "bugs": {
+    "url": "https://github.com/CookPiu/pyqtNotepad/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CookPiu/pyqtNotepad.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "exit 0"
+  }
+}
