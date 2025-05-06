@@ -15,7 +15,7 @@
   "type": "commonjs",
   "main": "index.js",
   "publishConfig": {
-    "@CookPiu:registry":"https://npm.pkg.github.com"
+    "@CookPiu:registry":"https://registry.npmjs.org/"
   },
   "directories": {
     "test": "tests"
