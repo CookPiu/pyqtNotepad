@@ -34,50 +34,98 @@
 
 ```plaintext
 pyqtNotepad/
+├── .gitattributes
+├── .gitignore
+├── environment.yml          # Conda 环境文件
 ├── main.py                  # 应用程序入口点
-├── environment.yml          # Conda 环境文件 (如果使用)
-├── requirements.txt         # Pip 依赖项列表
 ├── README.md                # 项目说明文档
+├── requirements.txt         # Pip 依赖项列表
 ├── assets/                  # 资源文件夹
-│   ├── style_light.qss      # 亮色主题样式 (替代 style.qss)
-│   └── style_dark.qss       # 暗色主题样式
+│   ├── style.qss            # 主样式文件
+│   ├── style_dark.qss       # 暗色主题样式
+│   └── style_light.qss      # 亮色主题样式
 ├── data/                    # 用户数据
-│   └── calendar_events.json # 日历事件存储
+│   ├── calendar_events.json # 日历事件存储
+│   └── speech_recognition/  # 语音识别相关数据
+│       └── config.json
 ├── note_downloader/         # 笔记下载器子模块 (独立项目)
-│   └── ...
+│   ├── environment.yml
+│   ├── README.md
+│   ├── config/
+│   │   ├── classify_rules.yaml
+│   │   └── config.yaml
+│   ├── downloads/
+│   │   └── ...              # 下载的文件 (结构复杂，省略)
+│   └── src/
+│       ├── __init__.py
+│       ├── checker.py
+│       ├── classifier.py
+│       ├── crawler.py
+│       ├── downloader.py
+│       ├── main.py
+│       └── utils.py
 ├── src/                     # 源代码目录
 │   ├── __init__.py          # 使 src 成为一个包
-│   ├── core/                # 核心功能 (待完善)
+│   ├── core/                # 核心功能
 │   │   ├── __init__.py
-│   │   ├── app.py           # (可能已合并到 main.py 或 MainWindow)
-│   │   └── settings.py      # 应用程序设置管理 (待实现)
-│   ├── services/            # 服务层 (待进一步重构逻辑)
+│   │   ├── app.py           # 应用程序核心逻辑
+│   │   └── settings.py      # 应用程序设置管理
+│   ├── services/            # 服务层
 │   │   ├── __init__.py
 │   │   ├── file_service.py
 │   │   ├── format_service.py
 │   │   └── text_service.py
 │   ├── ui/                  # 用户界面组件
 │   │   ├── __init__.py
-│   │   ├── main_window.py   # 主窗口
-│   │   ├── editor.py        # 文本编辑器组件 (带行号)
-│   │   ├── file_explorer.py # 文件浏览器
-│   │   ├── pdf_viewer.py    # PDF预览对话框
-│   │   ├── calculator_widget.py # 计算器窗口
-│   │   ├── calendar_widget.py # 日历窗口 (现在作为 CombinedToolsWidget 的一部分)
-│   │   ├── timer_widget.py    # 计时器窗口 (现在作为 CombinedToolsWidget 的一部分)
-│   │   ├── sticky_note_widget.py # 便签组件 (用于 CombinedNotesWidget)
-│   │   ├── todo_widget.py     # 待办事项组件 (用于 CombinedNotesWidget)
-│   │   ├── combined_notes_widget.py # 组合便签和待办的控件
-│   │   ├── combined_tools_widget.py # ★ 组合日历/便签待办/计时器的分页控件
-│   │   ├── note_downloader_widget.py # 笔记下载器界面包装器
-│   │   └── dialogs/         # 对话框组件
+│   │   ├── atomic/          # 原子组件 (基础、可复用的小部件)
+│   │   │   ├── __init__.py
+│   │   │   ├── file_explorer.py # 文件浏览器
+│   │   │   ├── calendar/
+│   │   │   │   ├── __init__.py
+│   │   │   │   └── calendar_widget.py # 日历小部件
+│   │   │   ├── editor/
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── html_editor.py     # HTML 编辑器
+│   │   │   │   ├── resizable_image_text_edit.py # 可调整大小图片的文本编辑器
+│   │   │   │   └── text_editor.py     # 纯文本编辑器 (带行号)
+│   │   │   └── mini_tools/
+│   │   │       ├── __init__.py
+│   │   │       ├── calculator_widget.py # 计算器小部件
+│   │   │       ├── README_speech_recognition.md # 语音识别模块说明
+│   │   │       ├── speech_config.py     # 语音识别配置
+│   │   │       ├── speech_recognition_widget.py # 语音识别小部件
+│   │   │       └── timer_widget.py    # 计时器小部件
+│   │   ├── components/      # UI 组件 (处理特定UI逻辑)
+│   │   │   ├── __init__.py
+│   │   │   ├── edit_operations.py   # 编辑操作相关逻辑
+│   │   │   ├── file_operations.py   # 文件操作相关逻辑
+│   │   │   ├── ui_manager.py        # UI 整体管理
+│   │   │   └── view_operations.py   # 视图操作相关逻辑
+│   │   ├── composite/       # 复合组件 (组合多个组件形成复杂功能单元)
+│   │   │   ├── __init__.py
+│   │   │   ├── combined_notes.py    # 组合便签和待办的控件
+│   │   │   └── combined_tools.py    # ★ 组合日历/便签待办/计时器的分页控件
+│   │   ├── core/            # UI 核心 (基础类、主题管理等)
+│   │   │   ├── __init__.py
+│   │   │   ├── base_dialog.py       # 对话框基类
+│   │   │   ├── base_widget.py       # 小部件基类
+│   │   │   └── theme_manager.py     # 主题管理
+│   │   ├── dialogs/         # 对话框组件
+│   │   │   └── __init__.py
+│   │   ├── main/            # 主应用界面相关
+│   │   │   ├── __init__.py
+│   │   │   ├── main_window.py       # 主窗口
+│   │   │   └── ui_initializer.py    # UI 初始化器
+│   │   └── views/           # 视图层 (顶层窗口或复杂视图的容器)
 │   │       ├── __init__.py
-│   │       └── # (当前对话框在对应 Widget 或 MainWindow 中实现)
+│   │       ├── note_downloader_view.py # 笔记下载器界面
+│   │       ├── pdf_viewer_view.py    # PDF 预览界面
+│   │       ├── sticky_notes_view.py  # 便签视图
+│   │       └── todo_list_view.py     # 待办事项视图
 │   └── utils/               # 工具类
 │       ├── __init__.py
-│       ├── pdf_utils.py     # PDF处理工具
-│       └── theme_manager.py # 主题管理
-└── tests/                   # 测试目录 (待添加)
+│       └── pdf_utils.py     # PDF处理工具
+└── tests/                   # 测试目录
     └── __init__.py
 ```
 
