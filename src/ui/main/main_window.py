@@ -36,9 +36,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         # --- Initialize Core Components ---
-        # UIManager now likely handles theme_manager access
         self.ui_manager = UIManager(self)
-        # Operations classes need a reference to the main window and potentially the UIManager
         self.file_operations = FileOperations(self, self.ui_manager)
         self.edit_operations = EditOperations(self, self.ui_manager)
         self.view_operations = ViewOperations(self, self.ui_manager)

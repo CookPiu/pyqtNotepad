@@ -30,6 +30,101 @@
     *   类 VS Code 布局 (Activity Bar, Sidebar, Editor Area, Status Bar)。
     *   Zen Mode (F11) 隐藏非必要界面元素。
 
+## 软件架构
+
+本应用程序采用分层架构模式，旨在实现关注点分离、提高模块化程度和可维护性。主要层次和组件如下：
+
+*   **应用入口 (`main.py`)**: 程序的起点，负责初始化 PyQt6 应用和主窗口。
+*   **主窗口 (`src/ui/main/main_window.py`)**: 应用程序的顶层窗口，承载所有UI元素和核心交互逻辑。它协调各个子系统和服务的运作。
+*   **UI层 (`src/ui/`)**: 负责用户界面的展示和交互。该层遵循组件化设计思想，具体划分为：
+    *   **UI管理器 (`src/ui/components/ui_manager.py`)**: 核心的UI协调者，负责主窗口内各个UI区域（如活动栏、侧边栏、编辑器区域、状态栏、Dock小部件）的初始化、布局和管理。
+    *   **UI核心 (`src/ui/core/`)**: 包含UI的基础元素，如自定义基类 (`BaseWidget`, `BaseDialog`)，以及主题管理 (`ThemeManager`)，为整个UI提供一致的外观和行为。
+    *   **原子组件 (`src/ui/atomic/`)**: 构成界面的最小、可复用的UI单元。例如文本编辑器 (`text_editor.py`)、HTML编辑器 (`html_editor.py`)、日历控件 (`calendar_widget.py`)、计算器 (`calculator_widget.py`)等。
+    *   **复合组件 (`src/ui/composite/`)**: 由多个原子组件或简单组件组合而成，实现更复杂的UI功能块。例如，集成了日历、便签待办和计时器的工具箱 (`CombinedTools`)。
+    *   **可停靠组件 (`src/ui/docks/`)**: 实现可停靠的窗口功能，如翻译面板 (`TranslationDock`)。这些通常由UI管理器集成到主窗口的特定区域。
+    *   **视图 (`src/ui/views/`)**: 代表特定功能的完整界面或大型UI区域，例如笔记下载器界面 (`note_downloader_view.py`)、PDF预览界面 (`pdf_viewer_view.py`)。
+    *   **对话框 (`src/ui/dialogs/`)**: 用于特定交互的弹出窗口，如翻译对话框 (`translation_dialog.py`)。
+    *   **UI操作逻辑 (`src/ui/components/`)**: 除了UI管理器，此目录还包含处理特定UI交互逻辑的模块，如文件操作 (`file_operations.py`)、编辑操作 (`edit_operations.py`)等，它们通常与主窗口或特定UI组件紧密协作，由主窗口或UI管理器进行调度。
+*   **核心功能层 (`src/core/`)**: 包含应用程序的核心业务逻辑和全局配置。
+    *   **应用逻辑 (`src/core/app.py`)**: 实现应用级别的主要功能、状态管理和不同模块间的协调。
+    *   **设置管理 (`src/core/settings.py`)**: 负责加载、保存和管理用户偏好设置（如主题、字体、窗口状态等）。
+*   **服务层 (`src/services/`)**: 提供具体的后台服务和功能实现，供UI层和核心功能层调用，实现业务逻辑与界面展示的分离。
+    *   `file_service.py`: 文件读写、管理等。
+    *   `format_service.py`: 文本格式化、代码高亮等。
+    *   `text_service.py`: 文本处理、查找替换等。
+    *   `translation_service.py`: 文本翻译功能。
+*   **工具类 (`src/utils/`)**: 包含通用的辅助函数和类，例如PDF处理工具 (`pdf_utils.py`)。
+*   **数据 (`data/`)**: 存储应用程序的持久化数据，如日历事件 (`calendar_events.json`)、API凭证和用户配置等。
+*   **资源 (`assets/`)**: 存放静态资源，主要是样式表 (QSS) 文件，用于定义亮色和暗色主题。
+*   **笔记下载器子模块 (`note_downloader/`)**: 这是一个相对独立的Python项目，作为子模块集成到主应用中。它有自己的依赖、配置和源代码结构，负责从Moodle等平台自动下载课程资料。主应用通过 `src/ui/views/note_downloader_view.py` 与其交互。
+
+以下是软件架构的简化示意图：
+
+```mermaid
+graph TD
+    A[main.py 应用入口] --> B(MainWindow 主窗口);
+
+    subgraph src [主应用源码]
+        direction TB
+
+        subgraph ui [UI层 src/ui]
+            direction LR
+            B --> UIManager[UI管理器 ui_manager.py];
+            UIManager --> UICore[UI核心 ui/core];
+            UIManager --> Atomic[原子组件 ui/atomic];
+            UIManager --> Composite[复合组件 ui/composite];
+            UIManager --> Docks[可停靠组件 ui/docks];
+            UIManager --> Views[视图 ui/views];
+            UIManager --> Dialogs[对话框 ui/dialogs];
+            B --> UIOps[UI操作逻辑 ui/components]; %% UIOps directly used by MainWindow or coordinated by UIManager
+        end
+
+        subgraph core_services [核心与服务层]
+            direction LR
+            subgraph core [核心功能 src/core]
+                B --> AppLogic[应用逻辑 app.py];
+                AppLogic --> Settings[设置 settings.py];
+            end
+
+            subgraph services [服务层 src/services]
+                B --> FileService[文件服务];
+                B --> FormatService[格式服务];
+                B --> TextService[文本服务];
+                B --> TranslationService[翻译服务];
+            end
+        end
+
+        subgraph utils [工具类 src/utils]
+            B --> PdfUtils[PDF工具 pdf_utils.py];
+        end
+    end
+
+    subgraph other [其他模块与数据]
+        direction TB
+        subgraph data_assets [数据与资源]
+            direction LR
+            UserData[用户数据 data/] <--> AppLogic;
+            Assets[资源 assets/] <--> UICore;
+        end
+
+        subgraph note_downloader_module [笔记下载器子模块 note_downloader/]
+            NoteDownloaderView[NoteDownloaderView (in src/ui/views)] --> NoteDownloaderCore[note_downloader/src (子模块核心)];
+            B --> NoteDownloaderView;
+        end
+    end
+
+    classDef default fill:#fff,stroke:#333,stroke-width:1px,color:#333;
+    classDef entrypoint fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef maincomponent fill:#ccf,stroke:#333,stroke-width:2px;
+    classDef submodule fill:#lightgrey,stroke:#333,stroke-width:2px;
+    classDef datastore fill:#f8c471,stroke:#333,stroke-width:1px;
+
+    class A entrypoint;
+    class B,UIManager,AppLogic,FileService,FormatService,TextService,TranslationService,PdfUtils,NoteDownloaderView,UIOps maincomponent;
+    class NoteDownloaderCore submodule;
+    class UserData,Assets datastore;
+```
+
 ## 项目结构
 
 ```plaintext

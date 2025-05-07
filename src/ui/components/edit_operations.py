@@ -91,7 +91,7 @@ class EditOperations:
                  print(f"Paste not supported for this editor type: {type(editor)}")
             return # Non-HtmlEditor paste handled.
 
-        # --- Old Logic (Commented out or removed for clarity) ---
+        # --- Old Logic  ---
         # The following blocks are now effectively replaced by the logic above.
         # elif mime.hasImage(): # This condition is now handled within the non-HtmlEditor 'else' block
             # print("-" * 20) # Keep debug prints for non-HTML path
