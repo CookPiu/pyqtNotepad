@@ -4,7 +4,7 @@ import math
 import re
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QGridLayout, QLineEdit, QApplication,
-                             QStackedWidget, QCheckBox, QButtonGroup, QMessageBox)
+                             QStackedWidget, QCheckBox, QButtonGroup, QMessageBox, QSizePolicy) # Added QSizePolicy
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QIcon
 

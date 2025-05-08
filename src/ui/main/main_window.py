@@ -76,6 +76,15 @@ class MainWindow(QMainWindow):
             # self.ui_manager.tab_widget = None # REMOVED
 
         # UIInitializer sets up the basic structure, now receives the tab_widget
+        print(f"DEBUG_MAIN_WINDOW: Before UIInitializer call, self.tab_widget is: {self.tab_widget}")
+        print(f"DEBUG_MAIN_WINDOW: Type of self.tab_widget is: {type(self.tab_widget)}")
+        if self.tab_widget is not None:
+            try:
+                print(f"DEBUG_MAIN_WINDOW: self.tab_widget.isVisible(): {self.tab_widget.isVisible()}")
+                print(f"DEBUG_MAIN_WINDOW: self.tab_widget.count(): {self.tab_widget.count()}")
+            except Exception as e_debug:
+                print(f"DEBUG_MAIN_WINDOW: Error accessing self.tab_widget properties: {e_debug}")
+
         self.ui_initializer = UIInitializer(self, self.ui_manager, self.tab_widget) # Pass tab_widget
 
         # --- State Variables (Keep relevant ones) ---

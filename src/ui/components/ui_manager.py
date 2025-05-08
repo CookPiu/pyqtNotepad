@@ -6,6 +6,7 @@ from PyQt6.QtGui import QIcon # **Import QIcon**
 # --- Corrected Relative Imports ---
 from ..composite.combined_tools import CombinedTools
 from ..atomic.mini_tools.calculator_widget import CalculatorWidget
+from ..atomic.mini_tools.timer_widget import TimerWidget # Added TimerWidget
 from ..atomic.mini_tools.speech_recognition_widget import SpeechRecognitionWidget
 from ..views.note_downloader_view import NoteDownloaderView
 from ..views.pdf_viewer_view import PdfViewerView
@@ -29,8 +30,11 @@ class UIManager:
         self.view_instances = {} # Initialize instance cache
         self.view_docks = {} # Initialize dock cache
         
-        # 注册语音识别组件
+        # 注册核心视图和组件
         self.register_speech_recognition()
+        self.register_view(NoteDownloaderView, "NoteDownloader") # 注册笔记下载器
+        self.register_view(CalculatorWidget, "计算器")
+        self.register_view(TimerWidget, "计时器")
     
     def apply_current_theme(self):
         """应用当前主题到UI组件"""

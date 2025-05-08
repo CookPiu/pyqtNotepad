@@ -35,10 +35,10 @@ class UIInitializer:
         self.main_window = main_window
         self.ui_manager = ui_manager # UIManager is now passed in
         self.tab_widget = tab_widget # Store the tab_widget passed from MainWindow
-        if self.tab_widget:
+        if self.tab_widget is not None: # Explicitly check for None
             print(f"DEBUG:UI_INIT.__init__: Received tab_widget.isVisible(): {self.tab_widget.isVisible()}, count: {self.tab_widget.count()}")
         else:
-            print("DEBUG:UI_INIT.__init__: Received tab_widget is None.")
+            print("DEBUG:UI_INIT.__init__: Received tab_widget is None. (Checked with 'is None')")
         self.main_window.file_explorer = None
         self.main_window.note_downloader_view_content = None # Stores the actual NoteDownloaderView instance
         self.main_window.note_downloader_panel = None # Stores the PanelWidget wrapper for NoteDownloader
@@ -137,10 +137,11 @@ class UIInitializer:
         # Center-Right Splitter (TabWidget | NoteDownloaderPanel)
         center_right_splitter = QSplitter(Qt.Orientation.Horizontal)
         center_right_splitter.setObjectName("CenterRightSplitter")
-        center_right_splitter.setHandleWidth(1)
+        center_right_splitter.setHandleWidth(2) # 增加宽度
+        center_right_splitter.setStyleSheet("QSplitter::handle { background-color: lightgray; border: 1px solid darkgray; } QSplitter::handle:hover { background-color: gray; }")
         center_right_splitter.setChildrenCollapsible(False)
 
-        if self.tab_widget: # Ensure tab_widget exists
+        if self.tab_widget is not None: # Explicitly check for None
             print(f"DEBUG:MAIN_LAYOUT: TabWidget initial: isVisible={self.tab_widget.isVisible()}, count={self.tab_widget.count()}, size={self.tab_widget.size()}, minSize={self.tab_widget.minimumSize()}, sizeHint={self.tab_widget.sizeHint()}")
             print(f"DEBUG:MAIN_LAYOUT: TabWidget parent: {self.tab_widget.parentWidget()}")
             print(f"DEBUG:MAIN_LAYOUT: TabWidget sizePolicy: H={self.tab_widget.sizePolicy().horizontalPolicy().name}, V={self.tab_widget.sizePolicy().verticalPolicy().name}")
@@ -168,7 +169,8 @@ class UIInitializer:
         # Main Splitter (FileExplorer | center_right_splitter)
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         main_splitter.setObjectName("MainSplitter")
-        main_splitter.setHandleWidth(1) 
+        main_splitter.setHandleWidth(2) # 增加宽度
+        main_splitter.setStyleSheet("QSplitter::handle { background-color: lightgray; border: 1px solid darkgray; } QSplitter::handle:hover { background-color: gray; }")
         main_splitter.setChildrenCollapsible(False)
         main_splitter.addWidget(self.main_window.file_explorer)
         main_splitter.addWidget(center_right_splitter)
@@ -191,12 +193,12 @@ class UIInitializer:
          self.main_window.activity_bar_toolbar.setObjectName("ActivityBarToolBar")
          self.main_window.activity_bar_toolbar.setMovable(False)
          self.main_window.activity_bar_toolbar.setFloatable(False)
-         self.main_window.activity_bar_toolbar.setFixedWidth(55)
-         self.main_window.activity_bar_toolbar.setStyleSheet("QToolBar { spacing: 5px; padding: 5px; }")
+         self.main_window.activity_bar_toolbar.setFixedWidth(60) 
+         self.main_window.activity_bar_toolbar.setStyleSheet("QToolBar { spacing: 5px; padding: 5px; } QToolButton { font-size: 9pt; }") # 统一调整按钮字体
 
          # Files Button (Toggles File Explorer visibility in QSplitter)
          files_btn = QToolButton(self.main_window.activity_bar_toolbar)
-         files_btn.setText("文件")
+         files_btn.setText("文件") #保持 "文件"
          files_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
          files_btn.setToolTip("文件管理 (切换)")
          files_btn.setCheckable(True)
@@ -208,46 +210,80 @@ class UIInitializer:
          self.main_window.toggle_sidebar_button = files_btn # Keep ref if needed elsewhere
 
          # --- Dynamically Add Buttons for Registered Views ---
-         # Note: This logic might need adjustment if views like NoteDownloader are now fixed in the splitter.
-         # For now, assume other views are still opened as docks or tabs via UIManager.
          print("UIInitializer: Adding buttons for registered views to activity toolbar...")
+         
+         # Define a mapping for shorter button texts or specific texts
+         button_text_map = {
+             "NoteDownloader": "下载", # Keep "下载" for NoteDownloader
+             "Calculator": "计算",     # Keep "计算" for Calculator
+             "Timer": "计时",         # Keep "计时" for Timer
+             "SpeechRecognition": "语音",
+             "StickyNotes": "便签",
+             "TodoList": "待办",
+             # Add other mappings if needed
+         }
+
          if hasattr(self.ui_manager, 'registered_views'):
+             # Ensure a consistent order for buttons if possible, e.g., by sorting view_names
+             # sorted_view_names = sorted(self.ui_manager.registered_views.keys()) # Optional: for consistent order
+             # for view_name in sorted_view_names:
+             #    view_info = self.ui_manager.registered_views[view_name]
+             
              for view_name, view_info in self.ui_manager.registered_views.items():
                  try:
-                     # Skip views that are now part of the main splitter layout
-                     if view_name in ["FileExplorer", "NoteDownloader"]: # Assuming "NoteDownloader" is its registered name
-                         # Special handling for NoteDownloader button
-                         if view_name == "NoteDownloader":
-                             nd_btn = QToolButton(self.main_window.activity_bar_toolbar)
-                             nd_btn.setText("下载")
-                             nd_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-                             nd_btn.setToolTip("笔记下载器 (切换)")
-                             nd_btn.setCheckable(True)
-                             # NoteDownloaderPanel is hidden in _create_core_views, so button should be unchecked
-                             nd_btn.setChecked(False) 
-                             nd_btn.clicked.connect(self._toggle_note_downloader_panel_visibility)
-                             # Connect panel's closed signal to button's setChecked
-                             if self.main_window.note_downloader_panel:
-                                 self.main_window.note_downloader_panel.closed.connect(lambda: nd_btn.setChecked(False))
-                             nd_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-                             self.main_window.activity_bar_toolbar.addWidget(nd_btn)
-                             print(f"  Added dedicated button for: {view_name} (using PanelWidget)")
+                     # Skip FileExplorer as it has a dedicated button already
+                     if view_name == "FileExplorer":
                          continue
                      
-                     if view_name in ["PdfViewer"]: # Example: PdfViewer still opens as a dock/tab or other mechanism
-                          continue # Skip for now or handle as before
+                     # Skip PdfViewer for now, or handle its button creation if it's to be on the activity bar
+                     if view_name == "PdfViewer":
+                          continue
 
                      view_btn = QToolButton(self.main_window.activity_bar_toolbar)
-                     view_btn.setToolTip(f"打开/切换到 {view_name}")
-                     button_text = view_name[:2] if len(view_name) > 2 else view_name
+                     
+                     # Determine button text: Use map first, then fallback
+                     button_text = button_text_map.get(view_name)
+                     if button_text is None: # Fallback logic if not in map
+                         if all('\u4e00' <= char <= '\u9fff' for char in view_name) and len(view_name) > 1:
+                             button_text = view_name[0] 
+                         elif len(view_name) > 2:
+                             button_text = view_name[:2]
+                         else:
+                             button_text = view_name
+                     
                      view_btn.setText(button_text)
+                     view_btn.setToolTip(f"打开/切换到 {view_name}")
                      view_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
                      view_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-                     view_btn.setCheckable(False) # Or True if it toggles a dock
-                     # This connect might need to change if open_in_dock is no longer the primary way for all views
-                     view_btn.clicked.connect(lambda checked=False, v_name=view_name: self.ui_manager.open_view(v_name, open_in_dock=True))
+                     
+                     # For NoteDownloader, it's now opened via UIManager like other tools
+                     # but its panel visibility is still toggled by its own button if that panel is part of main layout.
+                     # To make it behave like other dockable tools, we should use open_view.
+                     # The original _toggle_note_downloader_panel_visibility was for a fixed panel.
+                     # We will now make all registered views (except FileExplorer) open via UIManager.
+                     
+                     view_btn.setCheckable(True) # Make it checkable to reflect open/closed state of dock
+                                                      # UIManager.open_view will show/raise existing dock.
+                                                      # We need a way to uncheck button if dock is closed by user.
+                     
+                     # Connect to UIManager.open_view to open as a dock widget
+                     # Pass a lambda to capture the button itself to manage its checked state
+                     view_btn.clicked.connect(
+                         lambda checked, v_name=view_name, btn=view_btn: self.handle_activity_button_click(v_name, btn)
+                     )
+                     
+                     # Store button to potentially update its checked state if view is closed elsewhere
+                     if not hasattr(self.main_window, 'activity_view_buttons'):
+                         self.main_window.activity_view_buttons = {}
+                     self.main_window.activity_view_buttons[view_name] = view_btn
+                     # Initialize button state based on whether the view (dock) is already visible
+                     # This is tricky as UIManager.view_docks might not be populated yet or dock might be hidden.
+                     # For now, default to unchecked. UIManager.open_view will show it.
+                     view_btn.setChecked(False)
+
+
                      self.main_window.activity_bar_toolbar.addWidget(view_btn)
-                     print(f"  Added button '{button_text}' for: {view_name}")
+                     print(f"  Added button '{button_text}' for: {view_name} (opens via UIManager)")
 
                  except Exception as e:
                       print(f"  Error adding button for view '{view_name}': {e}")
@@ -258,6 +294,51 @@ class UIInitializer:
          spacer.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
          self.main_window.activity_bar_toolbar.addWidget(spacer)
          self.main_window.activity_bar_toolbar.show()
+
+    def handle_activity_button_click(self, view_name: str, button: QToolButton):
+        """Handles clicks from activity bar buttons for registered views."""
+        # Toggle the checked state of the button that was clicked
+        # Note: If open_view fails, or if the view is already open and focused,
+        # the button's state should ideally reflect the actual visibility of the dock.
+        # This basic toggle might need refinement if the dock can be closed by other means
+        # and the button state needs to be synced.
+        
+        # First, ensure UIManager opens/focuses the view.
+        # open_view with open_in_dock=True should handle showing and raising the dock.
+        view_instance = self.ui_manager.open_view(view_name, open_in_dock=True)
+
+        if view_instance:
+            # If view is successfully opened/focused, ensure button is checked.
+            # If the button was already checked (meaning user clicked to potentially hide),
+            # UIManager.open_view would have just raised it. We might want to hide it instead.
+            # This requires more complex state management of docks.
+            # For now, clicking always tries to show/focus, and button reflects this attempt.
+            
+            # Uncheck all other view buttons in the activity bar
+            if hasattr(self.main_window, 'activity_view_buttons'):
+                for v_name, btn in self.main_window.activity_view_buttons.items():
+                    if btn != button:
+                        btn.setChecked(False)
+            button.setChecked(True) # Check the clicked button
+
+            # If the view has a corresponding dock, connect its visibilityChanged signal
+            # to update the button's checked state.
+            dock = self.ui_manager.view_docks.get(view_name)
+            if dock:
+                # Disconnect previous connections for this button to avoid multiple triggers
+                try:
+                    dock.visibilityChanged.disconnect() 
+                except TypeError: # No connections to disconnect
+                    pass
+                # Connect to lambda that captures the correct button instance
+                dock.visibilityChanged.connect(lambda visible, b=button: b.setChecked(visible))
+                # Sync button state immediately
+                button.setChecked(dock.isVisible())
+
+        else:
+            # If open_view failed, uncheck the button
+            button.setChecked(False)
+
 
     def _toggle_file_explorer_visibility(self, checked):
          """Toggles visibility of FileExplorer in the QSplitter."""
