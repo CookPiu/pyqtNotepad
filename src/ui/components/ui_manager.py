@@ -1,7 +1,7 @@
 import os
 from PyQt6.QtWidgets import QDockWidget, QMessageBox, QWidget, QTabWidget
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon # **Import QIcon**
+from PyQt6.QtGui import QIcon, QColor # **Import QIcon and QColor**
 
 # --- Corrected Relative Imports ---
 from ..composite.combined_tools import CombinedTools
@@ -15,6 +15,7 @@ from ..core.base_widget import BaseWidget
 # Import editor types for checking
 from ..atomic.editor.text_editor import TextEditor
 from ..atomic.editor.html_editor import HtmlEditor
+from ..atomic.markdown_editor_widget import MarkdownEditorWidget # Import MarkdownEditorWidget
 # Import ThemeManager if needed directly (though likely handled by MainWindow now)
 from ..core.theme_manager import ThemeManager
 
@@ -202,14 +203,34 @@ class UIManager:
         # Update docks, tabs, etc.
         if hasattr(self.main_window, 'sidebar_dock') and hasattr(self.main_window.sidebar_dock.widget(), 'update_styles'):
             self.main_window.sidebar_dock.widget().update_styles(is_dark)
+        
         # Update open tabs/views
         if self.tab_widget: # Check if tab_widget exists
             for i in range(self.tab_widget.count()):
-                widget = self.tab_widget.widget(i)
-                if hasattr(widget, 'update_styles'):
-                    widget.update_styles(is_dark)
-                elif hasattr(widget, 'update_colors'): # Handle editors specifically
-                    widget.update_colors(is_dark)
+                widget_in_tab = self.tab_widget.widget(i) # This is the container widget
+                
+                # Handle MarkdownEditorWidget specifically for preview background
+                if isinstance(widget_in_tab, MarkdownEditorWidget):
+                    preview_bg_color = QColor("#1e1e1e") if is_dark else QColor("#ffffff") # Example dark/light colors
+                    widget_in_tab.set_preview_background_color(preview_bg_color)
+                    # QMarkdownTextEdit itself might also need theme updates if it doesn't follow QSS well
+                    # For now, assume QMarkdownTextEdit part of MarkdownEditorWidget handles its own theme via QSS or internal logic
+
+                # General style/color updates for other widgets
+                if hasattr(widget_in_tab, 'update_styles'): # For BaseWidget descendants
+                    widget_in_tab.update_styles(is_dark)
+                elif hasattr(widget_in_tab, 'update_colors'): # For older editor types
+                    widget_in_tab.update_colors(is_dark)
+                
+                # If the widget in tab is TextEditor or HtmlEditor (not MarkdownEditorWidget which contains its editor)
+                # and they have specific theme methods, call them.
+                # This part might be redundant if update_styles/update_colors is comprehensive.
+                actual_editor_component = widget_in_tab 
+                if isinstance(widget_in_tab, TextEditor) and hasattr(widget_in_tab._editor, 'update_colors'):
+                    widget_in_tab._editor.update_colors(is_dark) # Update internal editor
+                elif isinstance(widget_in_tab, HtmlEditor) and hasattr(widget_in_tab, 'update_colors'): # HtmlEditor is the editor
+                     widget_in_tab.update_colors(is_dark)
+
 
         current_theme = "暗色" if is_dark else "亮色"
         if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
@@ -443,11 +464,22 @@ class UIManager:
 
     # --- Utility Methods ---
     def is_widget_editor(self, widget: QWidget | None) -> bool:
-         """Checks if a widget is one of the known editor types."""
-         if widget is None:
-             return False
-         # Add other editor types here if needed
-         return isinstance(widget, (TextEditor, HtmlEditor))
+        """
+        Checks if a widget is one ofthe known actual editor components 
+        (e.g., _InternalTextEdit, HtmlEditor, QPlainTextEdit from MarkdownEditorWidget).
+        Note: For MarkdownEditorWidget, main_window.get_current_editor_widget() now returns the QPlainTextEdit.
+        This method is typically called with the result of main_window.get_current_editor_widget().
+        """
+        if widget is None:
+            return False
+        
+        from PyQt6.QtWidgets import QPlainTextEdit # Import QPlainTextEdit for type check
+        from ..atomic.editor.text_editor import _InternalTextEdit # Local import for TextEditor's internal part
+        # HtmlEditor is already imported at the class level of UIManager
+
+        # Check if it's the QPlainTextEdit from our MarkdownEditorWidget,
+        # or the _InternalTextEdit from our TextEditor, or an HtmlEditor.
+        return isinstance(widget, (HtmlEditor, _InternalTextEdit, QPlainTextEdit))
 
     def is_widget_html_editor(self, widget: QWidget | None) -> bool:
          """Checks specifically if a widget is an HtmlEditor."""

@@ -573,3 +573,14 @@ class HtmlEditor(QWebEngineView):
     #     super().focusInEvent(event)
     #     # Removed JS focus call: self.run_js("document.body.focus();")
     #     # print("HtmlEditor focusInEvent: Base event handled.") # Debug print (optional)
+
+    # --- Zoom Functionality ---
+    def set_content_zoom(self, factor: float):
+        """Sets the zoom factor for the HTML content."""
+        # QWebEngineView.setZoomFactor typically handles reasonable clamping.
+        # print(f"HtmlEditor: Setting content zoom factor to {factor:.2f}")
+        self.setZoomFactor(factor)
+
+    def get_content_zoom(self) -> float:
+        """Gets the current zoom factor of the HTML content."""
+        return self.zoomFactor()

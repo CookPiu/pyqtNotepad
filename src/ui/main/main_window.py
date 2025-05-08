@@ -23,7 +23,8 @@ from ..components.view_operations import ViewOperations
 from ..components.ui_manager import UIManager
 
 # Atomic/Composite/Views (UIManager or UIInitializer will handle these)
-# No direct imports of specific widgets like TextEditor, HtmlEditor, CalendarWidget etc. needed here anymore.
+from ..atomic.editor.html_editor import HtmlEditor # Added for type checking and zoom
+from ..atomic.markdown_editor_widget import MarkdownEditorWidget
 
 
 class MainWindow(QMainWindow):
@@ -37,7 +38,9 @@ class MainWindow(QMainWindow):
 
         # --- Initialize Core Components ---
         self.ui_manager = UIManager(self)
-        self.file_operations = FileOperations(self, self.ui_manager)
+        # Instantiate MarkdownEditorWidget early if FileOperations needs it, or pass a factory
+        self.markdown_editor_widget = MarkdownEditorWidget(self) # Instantiate
+        self.file_operations = FileOperations(self, self.ui_manager, self.markdown_editor_widget) # Pass it
         self.edit_operations = EditOperations(self, self.ui_manager)
 
         # --- Zoom Attributes ---
@@ -155,6 +158,7 @@ class MainWindow(QMainWindow):
         # Actions trigger the wrapper methods below
         self.new_action = QAction("新建文本", self, shortcut="Ctrl+N", toolTip="创建新文本文件 (Ctrl+N)", triggered=self.new_file_wrapper)
         self.new_html_action = QAction("新建HTML", self, shortcut="Ctrl+Shift+N", toolTip="创建新HTML文件 (Ctrl+Shift+N)", triggered=self.new_html_file_wrapper)
+        self.new_markdown_action = QAction("新建Markdown", self, shortcut="Ctrl+Alt+N", toolTip="创建新Markdown文件 (Ctrl+Alt+N)", triggered=self.new_markdown_file_wrapper) # New Action
         self.open_action = QAction("打开...", self, shortcut="Ctrl+O", toolTip="打开现有文件 (Ctrl+O)", triggered=self.open_file_dialog_wrapper)
         self.save_action = QAction("保存", self, shortcut="Ctrl+S", toolTip="保存当前文件 (Ctrl+S)", triggered=self.save_file_wrapper, enabled=False)
         self.save_as_action = QAction("另存为...", self, shortcut="Ctrl+Shift+S", toolTip="将当前文件另存为... (Ctrl+Shift+S)", triggered=self.save_file_as_wrapper, enabled=False)
@@ -191,6 +195,10 @@ class MainWindow(QMainWindow):
         self.zoom_out_action = QAction("缩小", self, shortcut="Ctrl+-", toolTip="缩小视图 (Ctrl+-)", triggered=self.zoom_out)
         self.reset_zoom_action = QAction("重置缩放", self, shortcut="Ctrl+0", toolTip="重置视图缩放 (Ctrl+0)", triggered=self.reset_zoom)
 
+        # --- Markdown Specific Actions ---
+        self.toggle_markdown_preview_action = QAction("预览 ↔ 编辑", self, checkable=True, shortcut="Ctrl+Shift+M", toolTip="切换Markdown预览面板 (Ctrl+Shift+M)", triggered=self.toggle_markdown_preview_panel_wrapper)
+        self.toggle_markdown_preview_action.setEnabled(False) # Initially disabled
+
         self.about_action = QAction("关于", self, toolTip="显示关于信息", triggered=self.show_about_wrapper)
 
     # --- Menu/Toolbar Creation (Remains largely the same, uses created actions) ---
@@ -198,7 +206,7 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
         # ... (Add menus and actions as before) ...
         file_menu = menu_bar.addMenu("文件")
-        file_menu.addActions([self.new_action, self.new_html_action, self.open_action, self.save_action, self.save_as_action])
+        file_menu.addActions([self.new_action, self.new_html_action, self.new_markdown_action, self.open_action, self.save_action, self.save_as_action])
         file_menu.addSeparator()
         file_menu.addAction(self.close_tab_action)
         file_menu.addSeparator()
@@ -225,6 +233,8 @@ class MainWindow(QMainWindow):
         view_menu = menu_bar.addMenu("视图")
         view_menu.addAction(self.zen_action)
         view_menu.addSeparator()
+        view_menu.addAction(self.toggle_markdown_preview_action) # Add to View menu
+        view_menu.addSeparator()
         view_menu.addAction(self.zoom_in_action)
         view_menu.addAction(self.zoom_out_action)
         view_menu.addAction(self.reset_zoom_action)
@@ -247,13 +257,15 @@ class MainWindow(QMainWindow):
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(20, 20))
 
-        self.toolbar.addActions([self.new_action, self.new_html_action, self.open_action, self.save_action])
+        self.toolbar.addActions([self.new_action, self.new_html_action, self.new_markdown_action, self.open_action, self.save_action])
         self.toolbar.addSeparator()
         self.toolbar.addActions([self.undo_action, self.redo_action])
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.find_action)
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.translate_action)
+        self.toolbar.addSeparator() # Separator for Markdown actions
+        self.toolbar.addAction(self.toggle_markdown_preview_action) # Add to main toolbar
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -301,6 +313,7 @@ class MainWindow(QMainWindow):
     # These wrappers keep the action connections simple in create_actions
     def new_file_wrapper(self): self.file_operations.new_file()
     def new_html_file_wrapper(self): self.file_operations.new_file(file_type="html")
+    def new_markdown_file_wrapper(self): self.file_operations.new_file(file_type="markdown") # New wrapper
     def open_file_dialog_wrapper(self): self.file_operations.open_file_dialog()
     def save_file_wrapper(self): self.file_operations.save_file()
     def save_file_as_wrapper(self): self.file_operations.save_file_as()
@@ -324,24 +337,47 @@ class MainWindow(QMainWindow):
     # def toggle_sidebar_wrapper(self): self.view_operations.toggle_sidebar() # If action exists
     def show_about_wrapper(self): self.view_operations.show_about()
 
+    def toggle_markdown_preview_panel_wrapper(self, checked):
+        """Wraps the logic to toggle the Markdown preview panel."""
+        current_tab_widget = self.tab_widget.currentWidget()
+        if isinstance(current_tab_widget, MarkdownEditorWidget):
+            current_tab_widget.set_preview_visible(checked)
+            # Ensure the action's checked state reflects the actual visibility
+            # This might be redundant if the action is the source of truth, but good for consistency
+            self.toggle_markdown_preview_action.setChecked(current_tab_widget.preview.isVisible())
+        else:
+            # If not a markdown editor, ensure action is unchecked and disabled
+            self.toggle_markdown_preview_action.setChecked(False)
+            self.toggle_markdown_preview_action.setEnabled(False)
+
+
     # --- Zoom Control Methods ---
     def zoom_in(self):
         """Increases the zoom factor and applies the theme."""
         self.current_zoom_factor = min(self.max_zoom_factor, self.current_zoom_factor + self.zoom_step)
         print(f"Zoom In: New factor = {self.current_zoom_factor:.2f}")
         self.ui_manager.apply_current_theme()
+        self._apply_content_zoom_to_current_editor()
 
     def zoom_out(self):
         """Decreases the zoom factor and applies the theme."""
         self.current_zoom_factor = max(self.min_zoom_factor, self.current_zoom_factor - self.zoom_step)
         print(f"Zoom Out: New factor = {self.current_zoom_factor:.2f}")
         self.ui_manager.apply_current_theme()
+        self._apply_content_zoom_to_current_editor()
 
     def reset_zoom(self):
         """Resets the zoom factor to default and applies the theme."""
         self.current_zoom_factor = 1.0
         print(f"Reset Zoom: New factor = {self.current_zoom_factor:.2f}")
         self.ui_manager.apply_current_theme()
+        self._apply_content_zoom_to_current_editor()
+
+    def _apply_content_zoom_to_current_editor(self):
+        """Applies the current zoom factor to the content of an active HtmlEditor."""
+        current_editor_widget = self.get_current_editor_widget()
+        if isinstance(current_editor_widget, HtmlEditor):
+            current_editor_widget.set_content_zoom(self.current_zoom_factor)
 
     # --- Keyboard Event for Zoom Shortcuts ---
     def keyPressEvent(self, event: QKeyEvent):
@@ -387,44 +423,44 @@ class MainWindow(QMainWindow):
         # Import necessary types locally to avoid potential top-level circular imports
         from ..atomic.editor.html_editor import HtmlEditor
         from ..atomic.editor.text_editor import TextEditor, _InternalTextEdit
+        # No need to import MarkdownEditorWidget again if it's already at the top level
+        # from ..atomic.markdown_editor_widget import MarkdownEditorWidget
 
         # Case 1: The widget in the tab IS the TextEditor wrapper
         if isinstance(current_tab_content, TextEditor):
             if hasattr(current_tab_content, '_editor'):
-                # print("DEBUG: get_current_editor_widget: Returning _editor from TextEditor wrapper")
-                return current_tab_content._editor # Return the internal _InternalTextEdit
+                return current_tab_content._editor
             else:
                 print("Warning: get_current_editor_widget: TextEditor wrapper has no _editor attribute.")
-                return current_tab_content # Fallback to wrapper
+                return current_tab_content
 
-        # Case 2: The widget in the tab IS the HtmlEditor (which is the actual editor)
         if isinstance(current_tab_content, HtmlEditor):
-             # print("DEBUG: get_current_editor_widget: Returning HtmlEditor directly")
              return current_tab_content
 
-        # Case 3: The widget in the tab IS the _InternalTextEdit (less likely but possible)
+        if isinstance(current_tab_content, MarkdownEditorWidget): # Handle MarkdownEditorWidget
+             return current_tab_content.editor # Return its internal QMarkdownTextEdit
+
         if isinstance(current_tab_content, _InternalTextEdit):
-             # print("DEBUG: get_current_editor_widget: Returning _InternalTextEdit directly")
              return current_tab_content
 
-        # Case 4: Check for nested editors as a fallback (e.g., if editor is inside another container)
+        # Fallback for nested editors
+        markdown_editor_widget = current_tab_content.findChild(MarkdownEditorWidget)
+        if markdown_editor_widget:
+            return markdown_editor_widget.editor
+
         html_editor = current_tab_content.findChild(HtmlEditor)
         if html_editor:
-            # print("DEBUG: get_current_editor_widget: Found nested HtmlEditor")
             return html_editor
 
         text_editor_wrapper = current_tab_content.findChild(TextEditor)
         if text_editor_wrapper:
             if hasattr(text_editor_wrapper, '_editor'):
-                # print("DEBUG: get_current_editor_widget: Found nested TextEditor wrapper, returning _editor")
                 return text_editor_wrapper._editor
             else:
                 print("Warning: get_current_editor_widget: Found nested TextEditor wrapper but no _editor attribute.")
                 return text_editor_wrapper
-
-        # Case 5: It's not an editor we know how to handle
-        # print(f"DEBUG: get_current_editor_widget: Returning non-editor widget: {type(current_tab_content)}")
-        return current_tab_content # Return the original widget (e.g., a view)
+        
+        return current_tab_content
 
     def get_current_editor(self):
         """获取当前编辑器的别名方法，用于兼容性"""
@@ -432,28 +468,33 @@ class MainWindow(QMainWindow):
 
     def on_current_tab_changed(self, index):
         """Updates UI elements when the current tab changes."""
-        current_widget = self.get_current_editor_widget()
-        self.update_edit_actions_state(current_widget)
+        current_editor_component = self.get_current_editor_widget() # This gets the actual editor like QMarkdownTextEdit
+        current_tab_container_widget = self.tab_widget.currentWidget() # This gets the container like MarkdownEditorWidget
+
+        self.update_edit_actions_state(current_editor_component) # Pass the actual editor component
         self.update_window_title()
-        self.current_editor_changed.emit(current_widget) # Emit signal with current widget
+        self.current_editor_changed.emit(current_editor_component)
 
-        # Handle special view logic (like collapsing browser for downloader)
-        self.view_operations.handle_tab_change(current_widget)
+        self.view_operations.handle_tab_change(current_tab_container_widget) # Pass the container
 
-        # Explicitly set focus if the current widget is an editor
-        if self.ui_manager.is_widget_editor(current_widget):
-             current_widget.setFocus() # Ensure the Qt widget gets focus first
-             # For HtmlEditor, try focusing its child widget after the main widget gets focus
-             from ..atomic.editor.html_editor import HtmlEditor # Need import for isinstance
-             if isinstance(current_widget, HtmlEditor):
-                 # QWebEngineView often has a child QWidget that handles rendering/input
-                 child_widget = current_widget.findChild(QWidget)
+        if isinstance(current_editor_component, HtmlEditor): # Check actual editor component
+            current_editor_component.set_content_zoom(self.current_zoom_factor)
+
+        # Update Markdown preview action state
+        if isinstance(current_tab_container_widget, MarkdownEditorWidget):
+            self.toggle_markdown_preview_action.setEnabled(True)
+            self.toggle_markdown_preview_action.setChecked(current_tab_container_widget.preview.isVisible())
+        else:
+            self.toggle_markdown_preview_action.setEnabled(False)
+            self.toggle_markdown_preview_action.setChecked(False)
+
+
+        if self.ui_manager.is_widget_editor(current_editor_component): # Check actual editor component
+             current_editor_component.setFocus()
+             if isinstance(current_editor_component, HtmlEditor):
+                 child_widget = current_editor_component.findChild(QWidget)
                  if child_widget:
-                     # Use a timer to ensure the focus change happens after the current event processing
                      QTimer.singleShot(0, child_widget.setFocus)
-                     # print("MainWindow.on_current_tab_changed: Scheduled focus for HtmlEditor child.") # Debug
-                 # else:
-                     # print("MainWindow.on_current_tab_changed: No child QWidget found for HtmlEditor.") # Debug
 
 
     def _update_copy_cut_state(self, available: bool):
@@ -474,62 +515,63 @@ class MainWindow(QMainWindow):
                           self.font_action, self.color_action, self.insert_image_action,
                           self.find_action, self.replace_action, self.save_action,
                           self.save_as_action, self.close_tab_action,
-                          self.translate_selection_action]:
+                          self.translate_selection_action, self.toggle_markdown_preview_action]: # Added toggle_markdown_preview_action
                 action.setEnabled(False)
             return
             
-        # Check if widget is TextEditor or HtmlEditor (via the ui_manager)
-        is_editor = self.ui_manager.is_widget_editor(current_widget)
-        is_writable = True  # For now we assume editors are writable. Could add a check later.
+        # current_widget is the actual editor component (e.g., QMarkdownTextEdit, _InternalTextEdit, HtmlEditor)
+        is_editor = self.ui_manager.is_widget_editor(current_widget) 
+        is_writable = True 
 
-        # If this is a text/html editor, check if document exists and has modification capabilities
         if is_editor:
             can_do_undo_redo = True
             if hasattr(current_widget, 'document') and callable(current_widget.document):
                 doc = current_widget.document()
-                if doc and hasattr(doc, 'isRedoAvailable'):
-                    # Enable/disable Undo/Redo based on document state
+                if doc: # Ensure doc is not None
                     self.undo_action.setEnabled(doc.isUndoAvailable())
                     self.redo_action.setEnabled(doc.isRedoAvailable())
-                    # Need to enable Save only if document is modified
                     if hasattr(doc, 'isModified'):
                         self.save_action.setEnabled(doc.isModified() and is_writable)
-                    # Flag that we've handled undo/redo state
-                    can_do_undo_redo = False
-                    
-        # Default undo/redo enable state if we couldn't check document state
-        if can_do_undo_redo:
+                    can_do_undo_redo = False # Handled
+            
+        if can_do_undo_redo and is_editor: # Fallback if document properties weren't available but it's an editor
             self.undo_action.setEnabled(True)
             self.redo_action.setEnabled(True)
+        elif not is_editor: # If not an editor, disable undo/redo
+            self.undo_action.setEnabled(False)
+            self.redo_action.setEnabled(False)
             
-        # Text selection state directly links to cut/copy/translate-selection actions
         has_selection = False
-        if current_widget is not None and hasattr(current_widget, 'textCursor'):
+        if current_widget is not None and hasattr(current_widget, 'textCursor') and callable(current_widget.textCursor):
             cursor = current_widget.textCursor()
             if cursor:
                 has_selection = cursor.hasSelection()
                 
-        self._update_copy_cut_state(has_selection)
-        # Update translate selection action too
-        self.translate_selection_action.setEnabled(has_selection)
+        self._update_copy_cut_state(has_selection and is_editor) # Also check if it's an editor
+        self.translate_selection_action.setEnabled(has_selection and is_editor)
                 
-        # Enable actions that require editor existence but no selection
         self.select_all_action.setEnabled(is_editor)
         self.find_action.setEnabled(is_editor)
         self.replace_action.setEnabled(is_editor)
         
-        # Save/Save As/Close tab
         self.save_as_action.setEnabled(is_editor and is_writable)
-        # Tab must exist to close it. save_action is updated above with document.isModified
-        # But if we can't check modification state, we'll enable it if writable
-        self.close_tab_action.setEnabled(True)
+        self.close_tab_action.setEnabled(True) # Always enabled if a tab is open
         
-        # Font and color actions can be used regardless of selection
         self.font_action.setEnabled(is_editor)
         self.color_action.setEnabled(is_editor)
-        # 只有当前标签是真正的 HtmlEditor 时，才启用"插入图片"
-        is_html = self.ui_manager.is_widget_html_editor(current_widget)
-        self.insert_image_action.setEnabled(is_html)
+        
+        # Enable insert_image_action only for HtmlEditor
+        # ui_manager.is_widget_html_editor expects the container, so we need to get the container from current_widget if possible
+        # However, current_widget here IS the editor component. So we check its type directly.
+        self.insert_image_action.setEnabled(isinstance(current_widget, HtmlEditor))
+
+        # Markdown preview action state is handled in on_current_tab_changed
+        # but ensure it's disabled if no editor or not markdown
+        current_tab_container_widget = self.tab_widget.currentWidget()
+        is_markdown_tab = isinstance(current_tab_container_widget, MarkdownEditorWidget)
+        self.toggle_markdown_preview_action.setEnabled(is_markdown_tab)
+        if is_markdown_tab:
+            self.toggle_markdown_preview_action.setChecked(current_tab_container_widget.preview.isVisible())
 
 
     def update_window_title(self):
