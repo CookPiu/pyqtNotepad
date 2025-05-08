@@ -1,4 +1,5 @@
 import os
+import sys # Added for sys.platform check
 from PyQt6.QtWidgets import (QFileDialog, QMessageBox, QApplication)
 from PyQt6.QtCore import QSignalBlocker
 
@@ -10,6 +11,7 @@ from ..atomic.markdown_editor_widget import MarkdownEditorWidget # Import Markdo
 # from ...utils.pdf_utils import cleanup_temp_images # cleanup_temp_images is no longer used
 # Import PdfViewerView for type checking or instantiation if needed elsewhere
 from ..views.pdf_viewer_view import PdfViewerView
+from ..views.office_viewer_view import OfficeViewerWidget # Added OfficeViewerWidget import
 
 
 class FileOperations:
@@ -92,7 +94,7 @@ class FileOperations:
         """打开文件对话框"""
         file_name, _ = QFileDialog.getOpenFileName(
             self.main_window, "打开文件", "", 
-            "HTML文件 (*.html);;Markdown文件 (*.md *.markdown);;文本文件 (*.txt);;PDF文件 (*.pdf);;所有文件 (*)"
+            "Office 文件 (*.docx *.xlsx *.pptx);;HTML文件 (*.html);;Markdown文件 (*.md *.markdown);;文本文件 (*.txt);;PDF文件 (*.pdf);;所有文件 (*)"
         )
         if file_name:
             self.open_file_from_path(file_name)
@@ -115,6 +117,32 @@ class FileOperations:
             if ext.lower() == '.pdf':
                 self.main_window.ui_manager.open_pdf_preview(abs_file_path)
                 return
+            
+            elif ext.lower() in ['.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt']: # Added legacy extensions
+                if sys.platform == 'win32':
+                    # Check if OfficeViewerWidget itself can be initialized (pywin32 check is inside it)
+                    # The OfficeViewerWidget now handles its own QWebEngineView for PDF display
+                    try:
+                        viewer_widget = OfficeViewerWidget(self.main_window)
+                        # loadFile now converts to PDF and loads it into its QWebEngineView
+                        if viewer_widget.loadFile(abs_file_path): 
+                            tab_name = os.path.basename(abs_file_path) + " (PDF预览)"
+                            index = self.main_window.tab_widget.addTab(viewer_widget, tab_name)
+                            self.main_window.tab_widget.setCurrentIndex(index)
+                            # Store original office file path for reference, though viewer handles temp PDF
+                            viewer_widget.setProperty("original_office_file_path", abs_file_path) 
+                            viewer_widget.setFocus() # Focus the new tab/widget
+                            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                                self.main_window.statusBar.showMessage(f"已打开 Office 文件 (PDF预览): {file_path}")
+                        else:
+                            # loadFile in OfficeViewerWidget would have shown an error message.
+                            # Clean up the widget if load failed and it wasn't added.
+                            viewer_widget.deleteLater()
+                    except Exception as e:
+                        QMessageBox.critical(self.main_window, "Office 预览错误", f"预览 Office 文件 '{file_path}' 时发生意外错误:\n{str(e)}")
+                else:
+                    QMessageBox.information(self.main_window, "功能限制", "Office 文件预览功能目前仅在 Windows 系统上通过本地 Office 转换实现。")
+                return # Processed Office file preview or showed message
 
             elif ext.lower() == '.html':
                 try:
