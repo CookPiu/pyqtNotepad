@@ -61,68 +61,70 @@
 以下是软件架构的简化示意图：
 
 ```mermaid
-graph TD
-    A[main.py 应用入口] --> B(MainWindow 主窗口);
+flowchart TB
+    A((Study Notes Software WBS))
 
-    subgraph src [主应用源码]
-        direction TB
+    A --> B1[1. Project Initiation and Planning]
+    B1 --> B11[1.1 Team Formation and Role Assignment]
+    B11 --> B111[1.1.1 Identify Project Manager / Scrum Master / Product Owner]
+    B11 --> B112[1.1.2 Recruit Team Members and Assign Responsibilities]
+    B1 --> B12[1.2 Requirements Gathering and Scope Definition]
+    B12 --> B121[User Interviews / Surveys]
+    B12 --> B122[Requirements Documentation: User Stories, Epics]
+    B12 --> B123[Requirements Traceability Matrix - RTM]
+    B12 --> B124[Define Project Scope]
+    B1 --> B13[1.3 Feasibility Analysis and Planning]
+    B13 --> B131[Technical Risk Assessment]
+    B13 --> B132[Function Point - FP - Estimation]
+    B13 --> B133[Milestones / Sprint Breakdown]
 
-        subgraph ui [UI层 src/ui]
-            direction LR
-            B --> UIManager[UI管理器 ui_manager.py];
-            UIManager --> UICore[UI核心 ui/core];
-            UIManager --> Atomic[原子组件 ui/atomic];
-            UIManager --> Composite[复合组件 ui/composite];
-            UIManager --> Docks[可停靠组件 ui/docks];
-            UIManager --> Views[视图 ui/views];
-            UIManager --> Dialogs[对话框 ui/dialogs];
-            B --> UIOps[UI操作逻辑 ui/components]; %% UIOps directly used by MainWindow or coordinated by UIManager
-        end
+    A --> C1[2. Design and Architecture]
+    C1 --> C11[2.1 System Architecture Design]
+    C11 --> C111[Module Breakdown]
+    C11 --> C112[Technology Selection]
+    C11 --> C113[Interfaces and Data Flows]
+    C1 --> C12[2.2 Database Design]
+    C12 --> C121[Initial Table Structures]
+    C12 --> C122[ER Diagram Creation]
+    C1 --> C13[2.3 UI and Prototype]
+    C13 --> C131[UI and UX Prototype]
+    C13 --> C132[Interaction Flow Design]
 
-        subgraph core_services [核心与服务层]
-            direction LR
-            subgraph core [核心功能 src/core]
-                B --> AppLogic[应用逻辑 app.py];
-                AppLogic --> Settings[设置 settings.py];
-            end
+    A --> D1[3. Implementation]
+    D1 --> D11[3.1 Front-End Modules]
+    D11 --> D111[Text Notes]
+    D11 --> D112[Image Notes]
+    D11 --> D113[Voice Notes]
+    D11 --> D114[Study Material Management]
+    D11 --> D115[Study Plan Management]
+    D11 --> D116[Time Management]
+    D1 --> D12[3.2 Back-End Modules]
+    D12 --> D121[API Design and Implementation]
+    D12 --> D122[Database Access Layer]
+    D12 --> D123[Voice Recognition Integration]
+    D12 --> D124[User Auth and Authorization]
+    D1 --> D13[3.3 System Integration and Testing]
 
-            subgraph services [服务层 src/services]
-                B --> FileService[文件服务];
-                B --> FormatService[格式服务];
-                B --> TextService[文本服务];
-                B --> TranslationService[翻译服务];
-            end
-        end
+    A --> E1[4. Testing and Quality Assurance]
+    E1 --> E11[Test Case Design]
+    E1 --> E12[Test Execution]
+    E1 --> E13[Defect Tracking and Fixing]
 
-        subgraph utils [工具类 src/utils]
-            B --> PdfUtils[PDF工具 pdf_utils.py];
-        end
-    end
+    A --> F1[5. Deployment and Release]
+    F1 --> F11[Deployment Environment Setup]
+    F1 --> F12[Deployment Process and Automation]
+    F1 --> F13[Acceptance and Go-Live]
 
-    subgraph other [其他模块与数据]
-        direction TB
-        subgraph data_assets [数据与资源]
-            direction LR
-            UserData[用户数据 data/] <--> AppLogic;
-            Assets[资源 assets/] <--> UICore;
-        end
+    A --> G1[6. Maintenance and Enhancement]
+    G1 --> G11[Monitoring and Logging]
+    G1 --> G12[User Feedback and Iteration]
+    G1 --> G13[Documentation and Knowledge Base]
 
-        subgraph note_downloader_module [笔记下载器子模块 note_downloader/]
-            NoteDownloaderView[NoteDownloaderView (in src/ui/views)] --> NoteDownloaderCore[note_downloader/src (子模块核心)];
-            B --> NoteDownloaderView;
-        end
-    end
+    A --> H1[7. Project Closure]
+    H1 --> H11[Project Review and Lessons Learned]
+    H1 --> H12[Archiving Project Documents]
+    H1 --> H13[Team Dissolution or Transition to Operations]
 
-    classDef default fill:#fff,stroke:#333,stroke-width:1px,color:#333;
-    classDef entrypoint fill:#f9f,stroke:#333,stroke-width:2px;
-    classDef maincomponent fill:#ccf,stroke:#333,stroke-width:2px;
-    classDef submodule fill:#lightgrey,stroke:#333,stroke-width:2px;
-    classDef datastore fill:#f8c471,stroke:#333,stroke-width:1px;
-
-    class A entrypoint;
-    class B,UIManager,AppLogic,FileService,FormatService,TextService,TranslationService,PdfUtils,NoteDownloaderView,UIOps maincomponent;
-    class NoteDownloaderCore submodule;
-    class UserData,Assets datastore;
 ```
 
 ## 项目结构
