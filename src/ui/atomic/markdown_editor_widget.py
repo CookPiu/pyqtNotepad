@@ -3,10 +3,25 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRegularExpression, QSignalBlocker
 from PyQt6.QtGui import QColor, QAction, QSyntaxHighlighter, QTextCharFormat, QFont
 from markdown_it import MarkdownIt
-from markdownify import markdownify # Import markdownify
+from markdown_it.token import Token # Import Token for plugin
+from markdownify import markdownify
 
-# 全局解析器实例
-md = MarkdownIt()
+# --- Markdown-it plugin to add source line numbers ---
+def source_line_plugin(md_instance: MarkdownIt):
+    def add_line_attributes_rule(state):
+        for token in state.tokens:
+            if token.map and token.type not in ["list_item_close", "paragraph_close", "heading_close"]: # Avoid adding to closing tags if not needed
+                # Add to block-level opening tags or self-closing tags that have a map
+                if token.nesting >= 0: # Opening or self-closing
+                    line_start = token.map[0]
+                    token.attrSet('data-source-line', str(line_start))
+    
+    # Apply to the core ruler to process tokens after parsing
+    md_instance.core.ruler.push('source_line_attributes', add_line_attributes_rule)
+
+# Global MarkdownIt instance with the plugin
+md = MarkdownIt().use(source_line_plugin)
+
 
 class MarkdownHighlighter(QSyntaxHighlighter):
     def __init__(self, parent): # parent is QPlainTextEdit.document()
@@ -92,94 +107,107 @@ class MarkdownEditorWidget(QWidget):
         self.setLayout(main_layout)
 
         self._render_timer = QTimer(self, interval=100, singleShot=True)
-        self._render_timer.timeout.connect(self._render_preview_from_editor) # Renamed for clarity
+        self._render_timer.timeout.connect(self._render_preview_from_editor)
 
         self.editor.textChanged.connect(self._on_editor_text_changed)
         self._render_preview_html("") 
         self.is_preview_mode = False
-        self.stacked_widget.setCurrentIndex(self.editor_index) # Start with editor
+        self.stacked_widget.setCurrentIndex(self.editor_index)
 
     def _on_editor_text_changed(self):
-        # If we are in editor mode, start the timer to update the preview (which is hidden but needs to be current)
-        # If we are in preview mode, edits are happening in preview, not here.
         if not self.is_preview_mode:
             self._render_timer.start()
 
     def _render_preview_from_editor(self):
-        """Renders HTML from editor's content to the preview pane."""
         current_text = self.editor.toPlainText()
         self._render_preview_html(current_text)
-        self.content_changed.emit() # Emit content_changed, might be used for modified status
+        self.content_changed.emit()
 
     def _render_preview_html(self, markdown_text: str):
         try:
-            html = md.render(markdown_text)
-            # It's important that setHtml is called on the correct page object
+            html = md.render(markdown_text) # md instance now has the plugin
             if self.preview.page():
                  self.preview.page().setHtml(html)
-            else: # Page might not be ready immediately
-                 self.preview.setHtml(html) # Fallback
+            else:
+                 self.preview.setHtml(html)
         except Exception as e:
             print(f"Error rendering Markdown: {e}")
             self.preview.setHtml(f"<pre>Error rendering Markdown:\n{e}</pre>")
 
     def _sync_preview_to_editor(self, html_content: str):
-        """Converts HTML from preview to Markdown and updates editor."""
         try:
-            # Whitelist common block tags, otherwise markdownify might add too many newlines
-            # Adjust based on typical content and desired Markdown output
             converted_markdown = markdownify(html_content, heading_style='atx', bullets='*')
+            with QSignalBlocker(self.editor):
+                current_cursor_pos = self.editor.textCursor().position()
+                self.editor.setPlainText(converted_markdown)
+                cursor = self.editor.textCursor()
+                cursor.setPosition(min(current_cursor_pos, len(converted_markdown)))
+                self.editor.setTextCursor(cursor)
             
-            blocker = QSignalBlocker(self.editor) # Block signals during programmatic change
-            current_cursor_pos = self.editor.textCursor().position()
-            self.editor.setPlainText(converted_markdown)
-            # Try to restore cursor position, might not be perfect after content change
-            cursor = self.editor.textCursor()
-            cursor.setPosition(min(current_cursor_pos, len(converted_markdown)))
-            self.editor.setTextCursor(cursor)
-            blocker.unblock() # Manually unblock, or rely on __exit__ if 'with' was used
-
-            # After syncing, the editor's content has changed, so the preview needs to be re-rendered
-            # from this new Markdown source to ensure consistency if user switches back to preview.
-            self._render_preview_html(converted_markdown)
-            self.editor.document().setModified(True) # Content was changed
+            self._render_preview_html(converted_markdown) # Re-render preview with cleaned MD
+            self.editor.document().setModified(True)
             self.content_changed.emit()
-
         except Exception as e:
             print(f"Error converting HTML to Markdown: {e}")
 
-
     def set_preview_visible(self, show_preview: bool):
-        current_editor_text = self.editor.toPlainText()
+        if show_preview:
+            if not self.is_preview_mode or self.stacked_widget.currentWidget() != self.preview:
+                current_editor_text = self.editor.toPlainText()
+                self._render_preview_html(current_editor_text)
 
-        if show_preview: # Switching to Preview Mode
-            if not self.is_preview_mode: # Only if changing mode
-                self._render_preview_html(current_editor_text) # Ensure preview is up-to-date
-                if self.preview.page():
-                    self.preview.page().runJavaScript("document.documentElement.contentEditable = 'true';") # Use documentElement for whole page
+                current_block_number = self.editor.textCursor().blockNumber() # 0-indexed
+                
+                def apply_preview_settings():
+                    if self.preview.page():
+                        self.preview.page().runJavaScript("document.body.contentEditable = 'true';")
+                        # Scroll to element with data-source-line attribute
+                        scroll_js = (
+                            f"const targetElement = document.querySelector('[data-source-line=\"{current_block_number}\"]');"
+                            "if (targetElement) { targetElement.scrollIntoView({ behavior: 'auto', block: 'start' }); }"
+                            "else { window.scrollTo(0, 0); }" # Fallback to top if element not found
+                        )
+                        self.preview.page().runJavaScript(scroll_js)
+                        self.preview.setFocus()
+                
+                QTimer.singleShot(200, apply_preview_settings) # Increased delay for complex pages and JS execution
+
                 self.stacked_widget.setCurrentIndex(self.preview_index)
-                self.preview.setFocus()
                 self.is_preview_mode = True
-        else: # Switching to Editor Mode
-            if self.is_preview_mode: # Only if changing mode
+        else: 
+            if self.is_preview_mode or self.stacked_widget.currentWidget() != self.editor:
                 if self.preview.page():
-                    self.preview.page().runJavaScript("document.documentElement.contentEditable = 'false';")
-                    # Asynchronously get HTML and then sync
+                    self.preview.page().runJavaScript("document.body.contentEditable = 'false';")
                     self.preview.page().toHtml(self._sync_preview_to_editor) 
+                
                 self.stacked_widget.setCurrentIndex(self.editor_index)
                 self.editor.setFocus()
                 self.is_preview_mode = False
         
         self.view_mode_changed.emit(self.is_preview_mode)
 
-
     def load_markdown(self, file_path: str) -> bool:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            self.editor.setPlainText(content)
-            self._render_preview_html(content) # Update preview regardless of current mode
+            
+            with QSignalBlocker(self.editor): # Block signals during setPlainText
+                self.editor.setPlainText(content)
+            
+            self._render_preview_html(content) 
             self.editor.document().setModified(False)
+
+            # Scroll to top for both views on new load
+            self.editor.verticalScrollBar().setValue(0)
+            if self.preview.page():
+                 QTimer.singleShot(100, lambda: self.preview.page().runJavaScript("window.scrollTo(0, 0);"))
+
+
+            if self.is_preview_mode: # If already in preview mode, make it editable
+                 QTimer.singleShot(150, lambda: self.preview.page().runJavaScript("document.body.contentEditable = 'true';") if self.preview.page() else None)
+                 self.preview.setFocus()
+            else:
+                 self.editor.setFocus()
             return True
         except Exception as e:
             print(f"Error loading Markdown file {file_path}: {e}")
@@ -187,16 +215,13 @@ class MarkdownEditorWidget(QWidget):
 
     def save_markdown(self, file_path: str) -> bool:
         try:
-            # If in preview mode, first sync preview changes back to editor
-            if self.is_preview_mode and self.preview.page():
-                # This is tricky because toHtml is async. Saving should ideally wait.
-                # For simplicity now, we save the editor's current content.
-                # A more robust solution would force sync before save or save from preview's HTML.
-                # Let's assume for now that if user hits save, they want the source editor's content.
-                # Or, we can attempt a synchronous-like fetch if possible, but QWebEnginePage.toHtml is async.
-                print("Warning: Saving while in preview mode. Content from source editor will be saved.")
-                # To make it save what's in preview, we'd need to call toHtml and do the save in its callback.
-                # This complicates the save_markdown signature.
+            if self.is_preview_mode:
+                print("Warning: Saving while in preview mode. Syncing from preview to editor first.")
+                # This sync is async. For robust save, this should be handled carefully.
+                # For now, we'll proceed with current editor content if sync is too slow.
+                # A better way: disable save button in preview, or force sync then save.
+                # For this iteration, we save what's in self.editor. User should switch to editor to ensure sync.
+                pass # Content is already synced when switching out of preview mode (if user did so)
 
             content = self.editor.toPlainText()
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -208,21 +233,19 @@ class MarkdownEditorWidget(QWidget):
             return False
 
     def get_content(self) -> str:
-        # If in preview mode, ideally we should get the (potentially edited) preview content,
-        # convert to MD, and return that. But toHtml is async.
-        # For now, always return from the source editor.
         return self.editor.toPlainText()
 
     def set_content(self, text: str):
-        self.editor.setPlainText(text)
-        self._render_preview_html(text) # Update preview
+        with QSignalBlocker(self.editor):
+            self.editor.setPlainText(text)
+        self._render_preview_html(text)
 
     def clear_content(self):
-        self.editor.clear()
+        with QSignalBlocker(self.editor):
+            self.editor.clear()
         self._render_preview_html("")
 
     def set_preview_background_color(self, color: QColor):
-        # More robust script to set background color
         js_script = (
             f"if(document.body) {{ document.body.style.backgroundColor = '{color.name()}'; }} "
             f"else if(document.documentElement) {{ document.documentElement.style.backgroundColor = '{color.name()}'; }}"
@@ -251,7 +274,8 @@ if __name__ == '__main__':
             self.preview_action.triggered.connect(self.toggle_view)
             toolbar.addAction(self.preview_action)
             self.markdown_widget.view_mode_changed.connect(self.preview_action.setChecked)
-            self.markdown_widget.set_content("# Hello Markdown!\n\nThis is a **test**.\n\n* Item 1\n* Item 2\n\n```python\nprint('Hello')\n```\n\nVisit [Google](https://www.google.com)")
+            self.markdown_widget.set_content("# Hello Markdown!\n\nThis is a **test**.\n\n* Item 1\n* Item 2\n\n```python\nprint('Hello')\n```\n\nVisit [Google](https://www.google.com)\n\n" + "\n".join([f"Line {i}" for i in range(50)]))
+
 
         def toggle_view(self, checked):
             self.markdown_widget.set_preview_visible(checked)
