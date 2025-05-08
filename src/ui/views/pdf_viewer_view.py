@@ -294,7 +294,29 @@ class PdfViewerView(BaseDialog):
             return
         try:
             page = self.pdf_document_for_images.load_page(page_num)
-            zoom = 1.5; mat = fitz.Matrix(zoom, zoom)
+
+            # Dynamic zoom calculation
+            screen = QApplication.primaryScreen()
+            if screen: # Ensure screen is available (it should be in a GUI app)
+                device_pix_ratio = screen.devicePixelRatioF() # Use F version for float, more precise
+            else:
+                device_pix_ratio = 1.0 # Fallback
+
+            page_width_points = page.rect.width
+            available_width_pixels = self.scroll_area.viewport().width()
+
+            if page_width_points > 0:
+                # Calculate zoom to fit available width
+                base_zoom = available_width_pixels / page_width_points
+            else:
+                base_zoom = 1.5 # Fallback if page width is zero
+
+            # Ensure a minimum zoom and apply device pixel ratio for sharpness
+            zoom = max(1.5, base_zoom) * device_pix_ratio 
+            # Cap zoom to a reasonable maximum to prevent excessive memory usage if needed, e.g., zoom = min(zoom, 5.0)
+            
+            mat = fitz.Matrix(zoom, zoom)
+            
             pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB, alpha=False)
             if pix.width == 0 or pix.height == 0:
                 self.image_display_label.setText(f"无法渲染第 {page_num + 1} 页 (空图像)")
