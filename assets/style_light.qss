@@ -6,11 +6,11 @@ QWidget         { background:#FFFFFF; color:#000000; }
 QPlainTextEdit, QLineEdit, QTextEdit { background:#FFFFFF; }   /* 保证编辑区纯白 */
 
 /* == 分割线 == */
-QSplitter::handle         { background:#E5E5E5; width:1px; }
-QSplitter::handle:hover   { background:#C8C8C8; }
+QSplitter::handle         { background:#D0D0D0; border:1px solid #B0B0B0; width:2px; margin: 0px; padding: 0px;}
+QSplitter::handle:hover   { background:#B0B0B0; }
 
 /* == Tab == */
-QTabWidget::pane          { border:0; }
+QTabWidget::pane          { border:1px solid #D0D0D0; }
 QTabBar::tab              { background:#F3F3F3; padding:6px 12px; margin-right:1px;
                              border-top:2px solid transparent; }
 QTabBar::tab:selected     { background:#FFFFFF; border-top:2px solid #007ACC; color:#000; }
@@ -48,15 +48,18 @@ QTreeView::item:selected { background:#CBE8FF; }
 
 /* Remove direct border from QDockWidget#FileExplorerDock as it wasn't working as expected */
 QDockWidget#FileExplorerDock {
-    border: none; 
+    border: none;
 }
 
 /* Try applying border to the FileExplorer widget itself */
 QWidget#MainFileExplorer {
-    border: none; /* Clear other borders */
-    border-right: 1px solid #D0D0D0; /* 1px border for the FileExplorer content */
+    border: 1px solid #D0D0D0; /* 1px border for the FileExplorer content */
 }
 
+/* == PanelWidget (通用工具面板容器) == */
+PanelWidget {
+    border: 1px solid #D0D0D0;
+}
 
 /* == 工具栏 == */
 QToolBar                 { background:#FFFFFF; border-bottom:1px solid #E5E5E5; }

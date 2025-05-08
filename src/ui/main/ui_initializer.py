@@ -137,8 +137,8 @@ class UIInitializer:
         # Center-Right Splitter (TabWidget | NoteDownloaderPanel)
         center_right_splitter = QSplitter(Qt.Orientation.Horizontal)
         center_right_splitter.setObjectName("CenterRightSplitter")
-        center_right_splitter.setHandleWidth(2) # 增加宽度
-        center_right_splitter.setStyleSheet("QSplitter::handle { background-color: lightgray; border: 1px solid darkgray; } QSplitter::handle:hover { background-color: gray; }")
+        center_right_splitter.setHandleWidth(2) # 宽度可以在 QSS 中设置，但这里保留以便更容易调整
+        # center_right_splitter.setStyleSheet("QSplitter::handle { background-color: lightgray; border: 1px solid darkgray; } QSplitter::handle:hover { background-color: gray; }") # 交给全局QSS控制
         center_right_splitter.setChildrenCollapsible(False)
 
         if self.tab_widget is not None: # Explicitly check for None
@@ -169,8 +169,8 @@ class UIInitializer:
         # Main Splitter (FileExplorer | center_right_splitter)
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         main_splitter.setObjectName("MainSplitter")
-        main_splitter.setHandleWidth(2) # 增加宽度
-        main_splitter.setStyleSheet("QSplitter::handle { background-color: lightgray; border: 1px solid darkgray; } QSplitter::handle:hover { background-color: gray; }")
+        main_splitter.setHandleWidth(2) # 宽度可以在 QSS 中设置，但这里保留以便更容易调整
+        # main_splitter.setStyleSheet("QSplitter::handle { background-color: lightgray; border: 1px solid darkgray; } QSplitter::handle:hover { background-color: gray; }") # 交给全局QSS控制
         main_splitter.setChildrenCollapsible(False)
         main_splitter.addWidget(self.main_window.file_explorer)
         main_splitter.addWidget(center_right_splitter)

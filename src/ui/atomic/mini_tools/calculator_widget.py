@@ -4,9 +4,9 @@ import math
 import re
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QGridLayout, QLineEdit, QApplication,
-                             QStackedWidget, QCheckBox, QButtonGroup, QMessageBox, QSizePolicy) # Added QSizePolicy
+                              QStackedWidget, QCheckBox, QButtonGroup, QMessageBox, QSizePolicy) # Added QSizePolicy
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtGui import QFont, QIcon, QColor
 
 # Correct relative import from atomic/mini_tools to core
 from ...core.base_widget import BaseWidget
@@ -91,11 +91,17 @@ class CalculatorWidget(BaseWidget):
         main_layout.setSpacing(8) # Reduced spacing
         main_layout.setContentsMargins(10, 10, 10, 10) # Reduced margins
 
-        # --- Display Frame ---
-        display_frame = QWidget()
-        display_frame.setObjectName("calcDisplayFrame")
-        display_layout = QVBoxLayout(display_frame)
-        display_layout.setContentsMargins(5, 5, 5, 5)
+        # --- Display Frame (Wrapped in a QFrame for card-like appearance) ---
+        outer_display_frame = QWidget() # Using QWidget as a simple container, can be QFrame if specific QFrame features needed for QSS
+        outer_display_frame.setObjectName("calcOuterDisplayFrame") # For QSS styling (shadow etc.)
+        outer_display_layout = QVBoxLayout(outer_display_frame)
+        outer_display_layout.setContentsMargins(0,0,0,0) # Outer frame controls padding via QSS
+
+        display_frame_content = QWidget() # Original display_frame becomes content
+        display_frame_content.setObjectName("calcDisplayFrameContent") # Keep separate object name if needed
+        display_layout = QVBoxLayout(display_frame_content)
+        display_layout.setContentsMargins(5, 5, 5, 5) # Inner padding for content
+
         self.history_display = QLabel("")
         self.history_display.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.history_display.setFont(QFont("Arial", 10)) # Smaller font
@@ -103,27 +109,39 @@ class CalculatorWidget(BaseWidget):
         display_layout.addWidget(self.history_display)
         self.display = QLineEdit("0")
         self.display.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.display.setFont(QFont("Arial", 20, QFont.Weight.Bold)) # Slightly smaller
-        self.display.setStyleSheet("border: none; background-color: transparent; color: #2c3e50; padding: 3px;")
+        # Font will be set in update_styles as per feedback's QSS part for display
+        # self.display.setFont(QFont("Arial", 20, QFont.Weight.Bold)) 
+        self.display.setFixedHeight(52) # As per feedback
+        # Stylesheet will be set in update_styles
+        # self.display.setStyleSheet("border: none; background-color: transparent; color: #2c3e50; padding: 3px;")
         self.display.textChanged.connect(self.on_display_changed)
         display_layout.addWidget(self.display)
-        main_layout.addWidget(display_frame)
+        
+        outer_display_layout.addWidget(display_frame_content) # Add content widget to outer frame
+        main_layout.addWidget(outer_display_frame) # Add outer frame to main layout
 
-        # --- Mode Selection Frame ---
+        # --- Mode Selection Frame (Using QPushButtons as Segmented Buttons) ---
         mode_frame = QWidget()
         mode_frame.setObjectName("calcModeFrame")
-        mode_layout = QHBoxLayout(mode_frame)
-        mode_layout.setContentsMargins(5, 2, 5, 2)
-        self.mode_group = QButtonGroup(self)
-        self.standard_mode = QCheckBox("标准")
-        self.scientific_mode = QCheckBox("科学")
-        self.expression_mode = QCheckBox("表达式")
-        self.mode_group.addButton(self.standard_mode)
-        self.mode_group.addButton(self.scientific_mode)
-        self.mode_group.addButton(self.expression_mode)
-        mode_layout.addWidget(self.standard_mode)
-        mode_layout.addWidget(self.scientific_mode)
-        mode_layout.addWidget(self.expression_mode)
+        mode_button_layout = QHBoxLayout(mode_frame) # Renamed layout
+        mode_button_layout.setContentsMargins(0, 0, 0, 0) # No external margins for the layout itself
+        mode_button_layout.setSpacing(0) # Buttons will touch if QSS doesn't separate
+
+        self.mode_button_group = QButtonGroup(self) # Renamed group
+        self.mode_button_group.setExclusive(True)
+
+        modes = ["标准", "科学", "表达式"]
+        self.mode_buttons = {} # To store QPushButtons
+
+        for i, mode_text in enumerate(modes):
+            btn = QPushButton(mode_text)
+            btn.setCheckable(True)
+            btn.setObjectName(f"modeButton{mode_text.replace(' ', '')}") # Object name for QSS
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            mode_button_layout.addWidget(btn)
+            self.mode_button_group.addButton(btn, i) # Add with ID for easy switching
+            self.mode_buttons[mode_text] = btn
+        
         main_layout.addWidget(mode_frame)
 
         # --- Stacked Widget for Modes ---
@@ -140,21 +158,37 @@ class CalculatorWidget(BaseWidget):
         main_layout.addWidget(self.stacked_widget)
 
         # Default mode
-        self.standard_mode.setChecked(True)
+        # self.standard_mode.setChecked(True) # Old checkbox
+        if "标准" in self.mode_buttons:
+            self.mode_buttons["标准"].setChecked(True) # Set new button as default
         self.display.setReadOnly(True) # Standard/Scientific are read-only
 
         # Apply initial styles
         self._apply_common_frame_style([display_frame, mode_frame])
-        self._apply_common_checkbox_style([self.standard_mode, self.scientific_mode, self.expression_mode])
+        # self._apply_common_checkbox_style is now obsolete for mode switchers
+        # self._apply_common_checkbox_style([self.standard_mode, self.scientific_mode, self.expression_mode])
 
     def _setup_standard_calculator_content(self, parent_widget):
         """创建标准计算器按钮布局"""
-        layout = QVBoxLayout(parent_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        buttons_frame = QWidget()
-        buttons_frame.setObjectName("calcStdButtonsFrame")
-        buttons_layout = QGridLayout(buttons_frame)
-        buttons_layout.setSpacing(5) # Reduced spacing
+        outer_layout = QVBoxLayout(parent_widget) # This layout is for the parent_widget of the stacked_widget
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        outer_buttons_frame = QWidget() # New outer frame for card style
+        outer_buttons_frame.setObjectName("calcOuterStdButtonsFrame")
+        layout = QVBoxLayout(outer_buttons_frame) # Layout for the new outer frame
+        layout.setContentsMargins(0,0,0,0) # Outer frame will control padding via QSS
+
+        buttons_frame_content = QWidget() # Original buttons_frame becomes content
+        buttons_frame_content.setObjectName("calcStdButtonsFrameContent")
+        buttons_layout = QGridLayout(buttons_frame_content)
+        buttons_layout.setHorizontalSpacing(8) # As per feedback
+        buttons_layout.setVerticalSpacing(8)   # As per feedback
+
+        # Add row/column stretch for standard calculator
+        for r in range(5): # 5 rows of buttons: C/⌫/±/÷, 7/8/9/×, ..., 0/./=
+            buttons_layout.setRowStretch(r, 1)
+        for c in range(4): # 4 columns
+            buttons_layout.setColumnStretch(c, 1)
 
         buttons = [
             ('C', 0, 0, 1, 1, '#e74c3c'), ('⌫', 0, 1, 1, 1, '#e67e22'),
@@ -165,18 +199,32 @@ class CalculatorWidget(BaseWidget):
             ('0', 4, 0, 1, 2), ('.', 4, 2), ('=', 4, 3, 1, 1, '#2ecc71'),
         ]
         self._create_buttons(buttons, buttons_layout)
-        layout.addWidget(buttons_frame)
-        self._apply_common_frame_style([buttons_frame]) # Apply frame style
+        layout.addWidget(buttons_frame_content) # Add content to new outer frame's layout
+        outer_layout.addWidget(outer_buttons_frame) # Add outer frame to parent_widget's layout
+        # self._apply_common_frame_style([buttons_frame]) # Style will be applied to outer_buttons_frame
 
     def _setup_scientific_calculator_content(self, parent_widget):
         """创建科学计算器按钮布局"""
-        layout = QVBoxLayout(parent_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        buttons_frame = QWidget()
-        buttons_frame.setObjectName("calcSciButtonsFrame")
-        buttons_layout = QGridLayout(buttons_frame)
-        buttons_layout.setSpacing(5)
+        outer_layout = QVBoxLayout(parent_widget)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
 
+        outer_buttons_frame = QWidget()
+        outer_buttons_frame.setObjectName("calcOuterSciButtonsFrame")
+        layout = QVBoxLayout(outer_buttons_frame)
+        layout.setContentsMargins(0,0,0,0)
+
+        buttons_frame_content = QWidget()
+        buttons_frame_content.setObjectName("calcSciButtonsFrameContent")
+        buttons_layout = QGridLayout(buttons_frame_content)
+        buttons_layout.setHorizontalSpacing(8) # As per feedback
+        buttons_layout.setVerticalSpacing(8)   # As per feedback
+
+        # Add row/column stretch for scientific calculator (7 rows, 5 columns)
+        for r in range(7): 
+            buttons_layout.setRowStretch(r, 1)
+        for c in range(5):
+            buttons_layout.setColumnStretch(c, 1)
+            
         buttons = [
             ('sin', 0, 0, 1, 1, '#9b59b6'), ('cos', 0, 1, 1, 1, '#9b59b6'),
             ('tan', 0, 2, 1, 1, '#9b59b6'), ('π', 0, 3, 1, 1, '#9b59b6'),
@@ -196,21 +244,28 @@ class CalculatorWidget(BaseWidget):
             ('0', 6, 0, 1, 2), ('.', 6, 2), ('=', 6, 3, 1, 2, '#2ecc71'),
         ]
         self._create_buttons(buttons, buttons_layout, scientific=True)
-        layout.addWidget(buttons_frame)
-        self._apply_common_frame_style([buttons_frame]) # Apply frame style
+        layout.addWidget(buttons_frame_content)
+        outer_layout.addWidget(outer_buttons_frame)
+        # self._apply_common_frame_style([buttons_frame])
 
     def _setup_expression_calculator_content(self, parent_widget):
         """创建表达式计算器按钮布局"""
-        layout = QVBoxLayout(parent_widget)
-        layout.setContentsMargins(0, 5, 0, 0) # Add top margin
+        outer_layout = QVBoxLayout(parent_widget)
+        outer_layout.setContentsMargins(0, 0, 0, 0) # Outer frame will handle top margin if needed via QSS
+
+        outer_buttons_frame = QWidget()
+        outer_buttons_frame.setObjectName("calcOuterExprButtonsFrame")
+        layout = QVBoxLayout(outer_buttons_frame) # Layout for outer frame
+        layout.setContentsMargins(0, 5, 0, 0) # Original top margin now inside the card
+
         info_label = QLabel("输入表达式，支持函数(sin,cos,ln,sqrt...),常量(pi,e),单位转换(convert(val, m_to_cm))")
         info_label.setWordWrap(True)
         info_label.setStyleSheet("font-size: 10px; color: #7f8c8d; padding: 3px; background-color: transparent;")
-        layout.addWidget(info_label)
+        layout.addWidget(info_label) # Info label inside the card
 
-        buttons_frame = QWidget()
-        buttons_frame.setObjectName("calcExprButtonsFrame")
-        buttons_layout = QGridLayout(buttons_frame)
+        buttons_frame_content = QWidget()
+        buttons_frame_content.setObjectName("calcExprButtonsFrameContent")
+        buttons_layout = QGridLayout(buttons_frame_content)
         buttons_layout.setSpacing(5)
 
         function_buttons = [
@@ -261,11 +316,11 @@ class CalculatorWidget(BaseWidget):
         clear_button.setStyleSheet("background-color: #e74c3c; color: white;")
         clear_button.clicked.connect(self.reset_calculator)
         buttons_layout.addWidget(clear_button, 6, 0, 1, 5) # Span full width
-
-        layout.addWidget(buttons_frame)
-        self._apply_common_frame_style([buttons_frame]) # Apply frame style
-        # Apply button styles to expression buttons
-        self._apply_common_button_style(buttons_frame.findChildren(QPushButton), scientific=True)
+        
+        layout.addWidget(buttons_frame_content) # Add button content to outer frame's layout
+        outer_layout.addWidget(outer_buttons_frame) # Add outer frame to parent_widget's layout
+        # self._apply_common_frame_style([buttons_frame])
+        # self._apply_common_button_style will be handled by update_styles
 
 
     def _create_buttons(self, button_definitions, layout, scientific=False):
@@ -280,8 +335,13 @@ class CalculatorWidget(BaseWidget):
 
             button = QPushButton(text)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            
+            # Set min-width: 0 for digit buttons, as per feedback
+            if text.isdigit() or text == '.':
+                button.setMinimumWidth(0)
+
             # Store style info, apply later in update_styles
-            button_style_map[button] = {'color': color, 'text': text}
+            button_style_map[button] = {'color': color, 'text': text, 'scientific': scientific} # Pass scientific flag
             button.clicked.connect(self.button_clicked)
             layout.addWidget(button, row, col, row_span, col_span)
         # Store map for theme updates
@@ -289,12 +349,21 @@ class CalculatorWidget(BaseWidget):
             self._sci_button_style_map = button_style_map
         else:
             self._std_button_style_map = button_style_map
+        
+        # Store all buttons created by this method for easier access in update_styles
+        if not hasattr(self, '_all_calculator_buttons'):
+            self._all_calculator_buttons = []
+        for btn in button_style_map.keys():
+            if btn not in self._all_calculator_buttons:
+                 self._all_calculator_buttons.append(btn)
+
 
     def _connect_signals(self):
         """连接信号与槽"""
-        self.standard_mode.toggled.connect(self.switch_calculator_mode)
-        self.scientific_mode.toggled.connect(self.switch_calculator_mode)
-        self.expression_mode.toggled.connect(self.switch_calculator_mode)
+        # self.standard_mode.toggled.connect(self.switch_calculator_mode) # Old
+        # self.scientific_mode.toggled.connect(self.switch_calculator_mode) # Old
+        # self.expression_mode.toggled.connect(self.switch_calculator_mode) # Old
+        self.mode_button_group.idClicked.connect(self.switch_calculator_mode_by_id)
 
     def _apply_theme(self):
         """应用主题样式 (由 BaseWidget 调用)"""
@@ -302,124 +371,245 @@ class CalculatorWidget(BaseWidget):
 
     def update_styles(self, is_dark: bool):
         """根据主题更新控件样式"""
-        bg_color = "rgba(45, 45, 45, 0.7)" if is_dark else "rgba(240, 240, 240, 0.7)"
-        text_color = "#ecf0f1" if is_dark else "#2c3e50"
-        history_text_color = "#95a5a6" if is_dark else "#7f8c8d"
-        border_color = "#555555" if is_dark else "#cccccc"
-        display_bg = "transparent" # Display background is usually transparent
-        button_default_bg = "#555" if is_dark else "#ecf0f1"
-        button_default_text = text_color
-        button_default_border = border_color
-        button_hover_bg = "#666" if is_dark else "#d6dbdf"
-        button_pressed_bg = "#444" if is_dark else "#bdc3c7"
-        checkbox_bg = "transparent" # Checkbox background usually transparent
+        # General theme colors
+        bg_color = "rgba(45, 45, 45, 0.9)" if is_dark else "rgba(240, 240, 240, 0.9)" # Slightly less transparent
+        text_color = "#F0F0F0" if is_dark else "#1A1A1A" # Higher contrast text
+        history_text_color = "#A0A0A0" if is_dark else "#666666"
+        border_color = "#505050" if is_dark else "#D0D0D0"
+        display_bg = "rgba(0,0,0,0.05)" if is_dark else "rgba(255,255,255,0.1)" # Subtle display bg
 
-        frame_style = f"background-color: {bg_color}; border-radius: 6px; padding: 5px;"
-        display_frame_style = f"background-color: {bg_color}; border-radius: 6px; padding: 8px;" # More padding for display
-        button_base_style = "border-radius: 6px; font-weight: bold;" # Removed min-height, let grid handle size
-        checkbox_style = f"""
-            QCheckBox {{ font-size: 12px; padding: 3px; color: {text_color}; background-color: {checkbox_bg}; }}
+        # Button color scheme from user feedback
+        COLOR_MAP_LIGHT = {
+            "digit": ("#F5F6FA", "#333333"), # background, text
+            "op_primary": ("#2962FF", "white"),
+            "op_secondary": ("#9C27B0", "white"),
+            "danger": ("#E53935", "white"),
+            "warning": ("#FB8C00", "white"),
+            "default": ("#E0E0E0", "#333333") # For buttons like ( ) etc.
+        }
+        COLOR_MAP_DARK = { # Adjust dark theme colors for similar visual hierarchy
+            "digit": ("#4A4A4A", "#F0F0F0"),
+            "op_primary": ("#448AFF", "white"), # Slightly lighter blue for dark bg
+            "op_secondary": ("#BA68C8", "white"), # Slightly lighter purple
+            "danger": ("#EF5350", "white"),
+            "warning": ("#FFA726", "white"),
+            "default": ("#3D3D3D", "#F0F0F0")
+        }
+        current_color_map = COLOR_MAP_DARK if is_dark else COLOR_MAP_LIGHT
+
+        # Base QSS for all buttons, as per user feedback
+        BASE_BUTTON_QSS = """
+            QPushButton {{
+                border: none;
+                border-radius: 6px; /* User suggestion */
+                font-size: 16px;    /* User suggestion */
+                font-weight: 600;   /* User suggestion */
+                min-height: 42px;   /* User suggestion */
+            }}
+            QPushButton:hover {{ filter: brightness(1.08); }}
+            QPushButton:pressed {{ filter: brightness(0.92); }}
         """
+        # This base QSS will be applied to the parent, and specific colors per button
+        # For simplicity, we will apply directly to each button for now.
 
-        # Apply styles
-        self.findChild(QWidget, "calcDisplayFrame").setStyleSheet(display_frame_style)
-        self.findChild(QWidget, "calcModeFrame").setStyleSheet(frame_style)
-        std_frame = self.findChild(QWidget, "calcStdButtonsFrame")
-        if std_frame: std_frame.setStyleSheet(frame_style)
-        sci_frame = self.findChild(QWidget, "calcSciButtonsFrame")
-        if sci_frame: sci_frame.setStyleSheet(frame_style)
-        expr_frame = self.findChild(QWidget, "calcExprButtonsFrame")
-        if expr_frame: expr_frame.setStyleSheet(frame_style)
+        frame_style = f"background-color: {bg_color}; border-radius: 6px; padding: 8px;" # Increased padding
+        # display_frame_style = frame_style # Display frame can use the same general frame style
+        
+        # Card styles for outer frames
+        card_bg_color = QColor(bg_color).lighter(103).name() if is_dark else QColor(bg_color).darker(103).name()
+        card_border_color = QColor(border_color).lighter(110).name() if is_dark else QColor(border_color).darker(110).name()
+        
+        # More distinct card background for light theme, subtle for dark
+        actual_card_bg = QColor(Qt.GlobalColor.white).name() if not is_dark else QColor("#2E2E2E").name() # Example dark card bg
+        actual_card_border = "#D0D0D0" if not is_dark else "#404040" # Example dark card border
+        
+        card_qss = f"""
+            QWidget {{
+                background-color: {actual_card_bg};
+                border-radius: 8px; /* Slightly more rounded */
+                border: 1px solid {actual_card_border};
+                /* For shadow, QGraphicsDropShadowEffect is better, QSS shadow is limited */
+                /* Example: 'box-shadow: 2px 2px 5px rgba(0,0,0,0.1);' - Not standard QSS */
+            }}
+        """
+        # Apply card style to the new outer frames
+        outer_display = self.findChild(QWidget, "calcOuterDisplayFrame")
+        if outer_display: outer_display.setStyleSheet(card_qss + "padding: 8px;") # Add padding to the card
 
-        self.display.setStyleSheet(f"border: none; background-color: {display_bg}; color: {text_color}; padding: 3px;")
-        self.history_display.setStyleSheet(f"color: {history_text_color}; margin-bottom: 2px; background-color: transparent;")
+        outer_std_buttons = self.findChild(QWidget, "calcOuterStdButtonsFrame")
+        if outer_std_buttons: outer_std_buttons.setStyleSheet(card_qss + "padding: 8px;")
 
-        for cb in [self.standard_mode, self.scientific_mode, self.expression_mode]:
-            cb.setStyleSheet(checkbox_style)
+        outer_sci_buttons = self.findChild(QWidget, "calcOuterSciButtonsFrame")
+        if outer_sci_buttons: outer_sci_buttons.setStyleSheet(card_qss + "padding: 8px;")
+        
+        outer_expr_buttons = self.findChild(QWidget, "calcOuterExprButtonsFrame")
+        if outer_expr_buttons: outer_expr_buttons.setStyleSheet(card_qss + "padding: 8px;")
 
-        # Update button styles
-        button_maps = [getattr(self, '_std_button_style_map', {}), getattr(self, '_sci_button_style_map', {})]
-        expr_buttons = self.expression_calculator.findChildren(QPushButton) if hasattr(self, 'expression_calculator') else []
 
-        all_buttons = list(btn for btn_map in button_maps for btn in btn_map.keys()) + expr_buttons
+        # Style for mode_frame (the container of mode buttons) - should be less prominent than cards
+        mode_frame_widget = self.findChild(QWidget, "calcModeFrame")
+        if mode_frame_widget:
+            mode_frame_widget.setStyleSheet(f"background-color: transparent; border: none; border-radius: 6px; padding: 0px; margin-bottom: 5px;")
 
-        for button in all_buttons:
-            style_info = None
-            for btn_map in button_maps:
-                if button in btn_map:
-                    style_info = btn_map[button]
-                    break
 
-            is_expr_button = button in expr_buttons
-            font_size = 14 if is_expr_button else (16 if style_info and style_info.get('scientific') else 18)
-            min_height = 35 if is_expr_button else (40 if style_info and style_info.get('scientific') else 50)
+        self.display.setStyleSheet(
+            f"border: none; background-color: {display_bg}; color: {text_color}; padding: 6px 12px 6px 12px; " # User suggested padding
+            f"font-family: 'SF Mono', 'Consolas'; font-size: 28px;" # User suggested font
+        )
+        self.history_display.setStyleSheet(f"color: {history_text_color}; margin-bottom: 2px; background-color: transparent; padding-right: 12px;")
 
-            final_style = f"{button_base_style} font-size: {font_size}px; min-height: {min_height}px;"
+        # Checkbox styling is removed as they are replaced by mode buttons
+        # self._apply_common_checkbox_style is also removed/obsolete
 
-            # Determine background and text color based on stored info or button text
-            bg = button_default_bg
-            txt_color = button_default_text
-            border = f"border: 1px solid {button_default_border};"
+        # Styling for mode buttons (QPushButtons styled as segmented buttons)
+        mode_btn_qss_parts = []
+        mode_button_names = ["标准", "科学", "表达式"]
+        for i, mode_text in enumerate(mode_button_names):
+            object_name = f"modeButton{mode_text.replace(' ', '')}"
+            
+            # Base style for each mode button
+            mode_btn_style = f"""
+                QPushButton#{object_name} {{
+                    border: 1px solid {border_color};
+                    background: {QColor(bg_color).lighter(105).name()};
+                    color: {text_color};
+                    padding: 7px 10px; /* Adjusted padding */
+                    min-height: 30px; /* Adjusted height */
+                    font-size: 13px; /* Adjusted font size */
+                }}
+                QPushButton#{object_name}:hover:!checked {{
+                    background: {QColor(bg_color).lighter(115).name()};
+                }}
+                QPushButton#{object_name}:checked {{
+                    background: {current_color_map['op_primary'][0]};
+                    color: {current_color_map['op_primary'][1]};
+                    border-color: {current_color_map['op_primary'][0]};
+                }}
+            """
+            # Adjust borders for segmented look
+            if i == 0: # First button
+                mode_btn_style += f"QPushButton#{object_name} {{ border-top-left-radius: 6px; border-bottom-left-radius: 6px; border-right-width: 0px; }}"
+            elif i == len(mode_button_names) - 1: # Last button
+                mode_btn_style += f"QPushButton#{object_name} {{ border-top-right-radius: 6px; border-bottom-right-radius: 6px; }}"
+            else: # Middle buttons
+                mode_btn_style += f"QPushButton#{object_name} {{ border-radius: 0px; border-right-width: 0px; }}"
+            
+            mode_btn_qss_parts.append(mode_btn_style)
+        
+        # Apply mode button styles directly to each button
+        for mode_text, button_widget in self.mode_buttons.items():
+            # Construct the specific QSS for this button based on its position
+            idx = mode_button_names.index(mode_text)
+            temp_qss = f"""
+                QPushButton#{button_widget.objectName()} {{
+                    border: 1px solid {border_color};
+                    background: {QColor(bg_color).lighter(105).name()};
+                    color: {text_color};
+                    padding: 7px 10px;
+                    min-height: 30px;
+                    font-size: 13px;
+                    {'border-top-left-radius: 6px; border-bottom-left-radius: 6px; border-right-width: 0px;' if idx == 0 else ''}
+                    {'border-top-right-radius: 6px; border-bottom-right-radius: 6px;' if idx == len(mode_button_names) - 1 else ('' if idx == 0 else 'border-radius: 0px; border-right-width: 0px;')}
+                }}
+                QPushButton#{button_widget.objectName()}:hover:!checked {{
+                    background: {QColor(bg_color).lighter(115).name()};
+                }}
+                QPushButton#{button_widget.objectName()}:checked {{
+                    background: {current_color_map['op_primary'][0]};
+                    color: {current_color_map['op_primary'][1]};
+                    border-color: {current_color_map['op_primary'][0]};
+                }}
+            """
+            button_widget.setStyleSheet(temp_qss)
 
-            if style_info: # Standard or Scientific button with color info
-                color_code = style_info.get('color', '#ecf0f1')
-                bg = color_code
-                txt_color = "#ffffff" if color_code != '#ecf0f1' else button_default_text
-                if is_dark and color_code == '#ecf0f1': # Adjust light default button for dark theme
-                     bg = button_default_bg
-                     txt_color = button_default_text
-                elif is_dark and color_code != '#ecf0f1': # Darken colored buttons slightly
-                     # Simple darkening - more sophisticated logic could be used
-                     qcolor = QColor(color_code)
-                     bg = qcolor.darker(120).name()
-                border = "border: none;" if color_code != '#ecf0f1' else border # No border for colored buttons
 
-            elif is_expr_button: # Expression button styling
-                 text = button.text()
+        # Update button styles using COLOR_MAP
+        # Iterate over all buttons collected in _create_buttons and expression mode buttons
+        all_calc_buttons = getattr(self, '_all_calculator_buttons', [])
+        expr_mode_buttons = self.expression_calculator.findChildren(QPushButton) if hasattr(self, 'expression_calculator') else []
+        
+        processed_buttons = set()
+
+        for button in all_calc_buttons + expr_mode_buttons:
+            if button in processed_buttons:
+                continue
+            processed_buttons.add(button)
+
+            text = button.text()
+            category = "default" # Default category
+
+            # Categorize buttons for styling (Standard and Scientific)
+            if text.isdigit() or text == '.':
+                category = "digit"
+            elif text in ['÷', '×', '-', '+', '=']:
+                category = "op_primary"
+            elif text in ['sin', 'cos', 'tan', 'x²', 'x³', 'xʸ', '√', 'ln', 'log', '1/x', 'π', 'e']: # Sci ops
+                category = "op_secondary"
+            elif text == 'C':
+                category = "danger"
+            elif text in ['⌫', '±']:
+                category = "warning"
+            
+            # Categorize Expression mode buttons
+            if self.mode_buttons["表达式"].isChecked() and button in expr_mode_buttons: # Updated check
                  if text in ['sin','cos','tan','ln','log','asin','acos','atan','exp','sqrt','pi','e','phi','c','g']:
-                     bg = "#8e44ad" if not is_dark else "#70368A" # Darker purple
-                     txt_color = "#ffffff"
-                     border = "border: none;"
+                     category = "op_secondary"
                  elif text in ['(',')','+','-','*','/','^','%',',']:
-                     bg = "#2980b9" if not is_dark else "#206694" # Darker blue
-                     txt_color = "#ffffff"
-                     border = "border: none;"
+                     category = "op_primary" # Or a new category like "op_expr"
                  elif text == '=':
-                     bg = "#27ae60" if not is_dark else "#1E8449" # Darker green
-                     txt_color = "#ffffff"
-                     border = "border: none;"
+                     category = "op_primary"
                  elif text == '清除':
-                     bg = "#c0392b" if not is_dark else "#922B21" # Darker red
-                     txt_color = "#ffffff"
-                     border = "border: none;"
-                 elif text == 'Help' or text.endswith('→') or text.startswith('convert'): # Unit conversion/Help
-                     bg = "#d35400" if not is_dark else "#a04000" # Darker orange/grey
-                     txt_color = "#ffffff"
-                     border = "border: none;"
-                 else: # Default expression button (shouldn't happen often)
-                      bg = button_default_bg
-                      txt_color = button_default_text
-                      border = f"border: 1px solid {button_default_border};"
+                     category = "danger"
+                 elif text == 'Help' or text.endswith('→') or text.startswith('convert'):
+                     category = "warning"
 
 
-            final_style += f" background-color: {bg}; color: {txt_color}; {border}"
-            # Add hover/pressed states
-            final_style += f" QPushButton:hover {{ background-color: {button_hover_bg}; }}"
-            final_style += f" QPushButton:pressed {{ background-color: {button_pressed_bg}; }}"
-
-            button.setStyleSheet(final_style)
-
+            btn_bg, btn_text_color = current_color_map.get(category, current_color_map["default"])
+            
+            # Use BASE_BUTTON_QSS and append specific colors
+            # Note: QSS filter property is not standard, hover/pressed are better handled by pseudo-states
+            specific_button_qss = (
+                f"QPushButton {{"
+                f"background-color: {btn_bg};"
+                f"color: {btn_text_color};"
+                f"border: none;"
+                f"border-radius: 6px;"
+                f"font-size: 16px;"
+                f"font-weight: 600;"
+                f"min-height: 42px;"
+                f"}}"
+                f"QPushButton:hover {{"
+                # f"background-color: {self.adjust_qcolor(QColor(btn_bg), 1.08).name()};" # Adjust brightness
+                f"background-color: {QColor(btn_bg).lighter(108).name()};" # Lighter shade for hover
+                f"}}"
+                f"QPushButton:pressed {{"
+                # f"background-color: {self.adjust_qcolor(QColor(btn_bg), 0.92).name()};" # Adjust brightness
+                f"background-color: {QColor(btn_bg).darker(108).name()};" # Darker shade for pressed
+                f"}}"
+            )
+            button.setStyleSheet(specific_button_qss)
+            
+    @staticmethod
+    def adjust_qcolor(color: QColor, factor: float) -> QColor:
+        """Adjusts QColor brightness by a factor."""
+        h, s, l, a = color.getHslF()
+        l = max(0.0, min(1.0, l * factor))
+        return QColor.fromHslF(h, s, l, a)
 
     # --- Helper Styling Methods ---
     def _apply_common_frame_style(self, widgets):
-        style = "background-color: rgba(240, 240, 240, 0.7); border-radius: 6px; padding: 5px;"
-        for w in widgets: w.setStyleSheet(style)
+        # This method is now OBSOLETE as QSS in update_styles handles frame styling
+        pass
+        # style = "background-color: rgba(240, 240, 240, 0.7); border-radius: 6px; padding: 5px;"
+        # for w in widgets: w.setStyleSheet(style)
 
     def _apply_common_checkbox_style(self, checkboxes):
-        style = """
-            QCheckBox { font-size: 12px; padding: 3px; background-color: transparent; }
-        """
-        for cb in checkboxes: cb.setStyleSheet(style)
+        # This method is now OBSOLETE as checkboxes are replaced by mode buttons
+        pass
+        # style = """
+        #     QCheckBox { font-size: 12px; padding: 3px; background-color: transparent; }
+        # """
+        # for cb in checkboxes: cb.setStyleSheet(style)
 
     def _apply_common_button_style(self, buttons, scientific=False):
         # This method is now less relevant as styles are applied in update_styles
@@ -445,24 +635,39 @@ class CalculatorWidget(BaseWidget):
 
 
     # --- Calculator Logic (mostly unchanged, adapted for widget context) ---
-    def switch_calculator_mode(self, checked):
-        if checked:
-            sender = self.sender()
-            if sender == self.standard_mode:
-                self.stacked_widget.setCurrentIndex(0)
-                self.display.setReadOnly(True)
-                # Adjust size hint if needed
-                self.adjustSize()
-            elif sender == self.scientific_mode:
-                self.stacked_widget.setCurrentIndex(1)
-                self.display.setReadOnly(True)
-                self.adjustSize()
-            elif sender == self.expression_mode:
-                self.stacked_widget.setCurrentIndex(2)
-                self.display.setReadOnly(False)
-                self.display.setFocus()
-                self.adjustSize()
-            self.reset_calculator() # Reset state when switching modes
+    # def switch_calculator_mode(self, checked): # Old method, to be removed
+    #     if checked:
+    #         sender = self.sender()
+    #         # ...
+    
+    def switch_calculator_mode_by_id(self, button_id: int):
+        """Switches calculator mode based on the ID of the button clicked in the mode_button_group."""
+        current_theme_is_dark = False # Default, will be updated if theme_manager exists
+        if hasattr(self, 'theme_manager') and self.theme_manager:
+            current_theme_is_dark = self.theme_manager.is_dark_theme()
+        elif hasattr(self.parent(), 'theme_manager') and self.parent().theme_manager: # Check parent
+            current_theme_is_dark = self.parent().theme_manager.is_dark_theme()
+
+
+        if button_id == 0:  # 标准
+            self.stacked_widget.setCurrentIndex(0)
+            self.display.setReadOnly(True)
+            # self.mode_buttons["标准"].setChecked(True) # Button group handles exclusive check
+        elif button_id == 1:  # 科学
+            self.stacked_widget.setCurrentIndex(1)
+            self.display.setReadOnly(True)
+            # self.mode_buttons["科学"].setChecked(True)
+        elif button_id == 2:  # 表达式
+            self.stacked_widget.setCurrentIndex(2)
+            self.display.setReadOnly(False)
+            self.display.setFocus()
+            # self.mode_buttons["表达式"].setChecked(True)
+        
+        self.adjustSize()  # Adjust size after mode switch
+        self.reset_calculator()  # Reset state when switching modes
+        # Re-apply styles to ensure :checked pseudo-state is updated correctly for the mode buttons
+        self.update_styles(is_dark=current_theme_is_dark)
+
 
     def button_clicked(self):
         # Standard/Scientific button logic

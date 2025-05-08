@@ -43,7 +43,35 @@ class UIManager:
         # theme_manager is now initialized in __init__
         style_sheet = self.theme_manager.get_current_style_sheet()
         if style_sheet: # Check if stylesheet loaded correctly
-            self.main_window.setStyleSheet(style_sheet) # Apply base style to main window
+            # Append QDockWidget border style
+            dock_widget_style = """
+            QDockWidget {
+                border: 1px solid #A9A9A9; /* DarkGray border for visibility */
+            }
+            QSplitter::handle { /* Ensure splitter handles are also visible */
+                background-color: #D3D3D3; /* LightGray */
+                border: 1px solid #A9A9A9; /* DarkGray */
+            }
+            QSplitter::handle:hover {
+                background-color: #BEBEBE; /* Slightly darker gray on hover */
+            }
+            """
+            # It's generally better to add to existing styles rather than overwrite if possible,
+            # but QWidget.setStyleSheet usually replaces.
+            # If theme files are comprehensive, this might override some specific settings.
+            # For now, we append. If issues arise, one might need to parse and merge QSS.
+            # A simpler approach for now is to prepend, so specific styles in file can override.
+            # Or, ensure the QSS files themselves include these.
+            # Given we are adding a general rule, appending should be fine.
+            
+            # Let's try prepending to allow theme file to override if it has more specific dock styles
+            # combined_style_sheet = dock_widget_style + style_sheet 
+            # Actually, appending is safer if the theme file might not end with a newline or could have comments at the end.
+            # And if the theme file already styles QDockWidget, this will override it.
+            # Let's assume the theme files do not have overly specific QDockWidget border styles that we want to keep.
+            
+            final_style_sheet = style_sheet + dock_widget_style
+            self.main_window.setStyleSheet(final_style_sheet)
         else:
             print("警告: 未能加载样式表，无法应用主题。")
 
