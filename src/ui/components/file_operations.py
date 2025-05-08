@@ -18,7 +18,7 @@ class FileOperations:
     def __init__(self, main_window, ui_manager, markdown_editor_widget_instance): # Accept ui_manager and markdown_editor_widget_instance
         self.main_window = main_window
         self.ui_manager = ui_manager # Store ui_manager
-        self.markdown_editor_widget_instance = markdown_editor_widget_instance # Store instance
+        # self.markdown_editor_widget_instance is not strictly needed if new instances are created per tab
         self.untitled_counter = 0 # Initialize counter here
 
     def new_file(self, file_type="text"):
@@ -69,14 +69,20 @@ class FileOperations:
         editor.setProperty("pdf_temp_dir", None) # Assuming not relevant for MD initially
 
         # Reset modified state
-        if isinstance(editor, TextEditor) and hasattr(editor, "document"):
-            editor.document().setModified(False)
-        elif isinstance(editor, HtmlEditor):
-            editor.setModified(False)
+        # For TextEditor, HtmlEditor (new), and MarkdownEditorWidget, the actual editor component has a document.
+        actual_editor_part = editor
+        if isinstance(editor, TextEditor):
+            actual_editor_part = editor._editor # _InternalTextEdit
+        elif isinstance(editor, HtmlEditor): # New HtmlEditor (QWidget)
+            actual_editor_part = editor.source_editor # QPlainTextEdit
         elif isinstance(editor, MarkdownEditorWidget):
-            editor.editor.document().setModified(False) # QMarkdownTextEdit has a document
-            # Or if QMarkdownTextEdit manages its own modified state, use its API
-            # editor.setModified(False) # Hypothetical if it had such a method
+            actual_editor_part = editor.editor # QPlainTextEdit
+        
+        if hasattr(actual_editor_part, 'document') and callable(actual_editor_part.document):
+            actual_editor_part.document().setModified(False)
+        elif hasattr(editor, 'setModified'): # Fallback for old HtmlEditor if it were still used by mistake
+             editor.setModified(False)
+
 
         self.main_window.statusBar.showMessage(f"新建 {file_type.upper()} 文件")
         self.main_window.update_edit_actions_state(self.main_window.get_current_editor_widget())
@@ -147,95 +153,76 @@ class FileOperations:
         except Exception as e:
              QMessageBox.critical(self.main_window, "打开文件错误", f"打开文件 '{file_path}' 时发生未知错误:\n{str(e)}")
 
-    def _save_html_editor_content(self, editor: HtmlEditor, file_path: str):
-        """异步保存HTML编辑器内容"""
-        def save_callback(html: str):
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(html)
-                # 在回调中更新状态
-                editor.setModified(False)
-                if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
-                    self.main_window.statusBar.showMessage(f"已保存: {file_path}")
-                # 确保标签标题也更新（如果标签仍然存在）
-                if self.ui_manager.is_widget_still_in_tabs(editor):
-                    self.main_window.update_tab_title(False)
-                print(f"异步保存成功: {file_path}") # Debugging
-            except Exception as e:
-                QMessageBox.critical(self.main_window, "错误",
-                                   f"无法异步保存文件 '{file_path}':\n{str(e)}")
-
-        # 调用异步 toHtml 并传递回调
-        editor.toHtml(save_callback)
-        # 注意：此函数立即返回，保存操作在后台进行
+    # _save_html_editor_content is removed as new HtmlEditor saves synchronously via its source_editor
 
     def save_file(self) -> bool:
-        """保存当前文件 (处理异步HTML保存)"""
-        editor = self.main_window.get_current_editor_widget() # Use the widget getter
-        if not editor: return False
+        """保存当前文件"""
+        # current_tab_container is the QWidget holding the editor (e.g. HtmlEditor, MarkdownEditorWidget, TextEditor)
+        current_tab_container = self.main_window.tab_widget.currentWidget()
+        # actual_editor_component is the QPlainTextEdit or _InternalTextEdit
+        actual_editor_component = self.main_window.get_current_editor_widget()
 
-        file_path = editor.property("file_path")
-        is_new = editor.property("is_new")
+        if not actual_editor_component or not current_tab_container: 
+            return False
+
+        file_path = current_tab_container.property("file_path")
+        is_new = current_tab_container.property("is_new")
 
         if is_new or not file_path:
             return self.save_file_as()
         else:
             try:
-                if isinstance(editor, HtmlEditor):
-                    self._save_html_editor_content(editor, file_path)
-                    return True
-                # Check if the actual editor widget (e.g., QMarkdownTextEdit from MarkdownEditorWidget) has a document
-                elif isinstance(editor, MarkdownEditorWidget): # Handle MarkdownEditorWidget
-                    content_to_save = editor.get_content() # Use its get_content method
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(content_to_save)
-                    editor.editor.document().setModified(False) # Access document of internal editor
-                    if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
-                        self.main_window.statusBar.showMessage(f"已保存: {file_path}")
-                    self.main_window.update_tab_title(False)
-                    return True
-                elif hasattr(editor, 'document'): # Handle TextEditor
-                    _, ext = os.path.splitext(file_path)
-                    # For TextEditor, toPlainText() is usually sufficient unless it's meant to save as HTML
-                    content_to_save = editor.toPlainText()
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(content_to_save)
-                    editor.document().setModified(False)
-                    if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
-                        self.main_window.statusBar.showMessage(f"已保存: {file_path}")
-                    self.main_window.update_tab_title(False)
-                    return True
+                content_to_save = ""
+                if isinstance(current_tab_container, HtmlEditor):
+                    content_to_save = actual_editor_component.toPlainText() # Save HTML source
+                elif isinstance(current_tab_container, MarkdownEditorWidget):
+                    content_to_save = actual_editor_component.toPlainText() # Save Markdown source
+                elif isinstance(current_tab_container, TextEditor):
+                    content_to_save = actual_editor_component.toPlainText() # Save plain text
                 else:
-                    raise TypeError(f"无法确定编辑器类型 {type(editor)} 以进行保存。")
+                    # Fallback or unknown editor type in tab
+                    if hasattr(actual_editor_component, 'toPlainText'):
+                        content_to_save = actual_editor_component.toPlainText()
+                    else:
+                        raise TypeError(f"无法确定编辑器类型 {type(current_tab_container)} / {type(actual_editor_component)} 以进行保存。")
+
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content_to_save)
+                
+                if hasattr(actual_editor_component, 'document'):
+                    actual_editor_component.document().setModified(False)
+                
+                if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                    self.main_window.statusBar.showMessage(f"已保存: {file_path}")
+                self.main_window.update_tab_title(False)
+                return True
             except Exception as e:
                 QMessageBox.critical(self.main_window, "错误", f"无法保存文件 '{file_path}':\n{str(e)}")
                 return False
 
     def save_file_as(self) -> bool:
-        """将文件另存为 (处理异步HTML保存和同步Markdown/Text保存)"""
-        current_tab_widget = self.main_window.tab_widget.currentWidget() # Get the widget in the tab (e.g. MarkdownEditorWidget)
-        editor_to_save_from = self.main_window.get_current_editor_widget() # Get the actual editor (e.g. QMarkdownTextEdit)
+        """将文件另存为"""
+        current_tab_container = self.main_window.tab_widget.currentWidget()
+        actual_editor_component = self.main_window.get_current_editor_widget()
         
-        if not editor_to_save_from or not current_tab_widget: return False
+        if not actual_editor_component or not current_tab_container: 
+            return False
 
-        current_path = current_tab_widget.property("file_path")
-        untitled_name = current_tab_widget.property("untitled_name")
+        current_path = current_tab_container.property("file_path")
+        untitled_name = current_tab_container.property("untitled_name")
         
         suggested_name = os.path.basename(current_path) if current_path else (untitled_name or f"未命名-{self.untitled_counter}")
         default_dir = os.path.dirname(current_path) if current_path else ""
 
         filters = "HTML文件 (*.html);;Markdown文件 (*.md *.markdown);;文本文件 (*.txt);;所有文件 (*)"
-        default_filter = "文本文件 (*.txt)" # Default
+        default_filter = "文本文件 (*.txt)"
 
-        if isinstance(current_tab_widget, HtmlEditor):
+        if isinstance(current_tab_container, HtmlEditor):
             default_filter = "HTML文件 (*.html)"
-        elif isinstance(current_tab_widget, MarkdownEditorWidget):
+        elif isinstance(current_tab_container, MarkdownEditorWidget):
             default_filter = "Markdown文件 (*.md *.markdown)"
-        elif current_path: # For TextEditor with existing path
-            _, ext = os.path.splitext(current_path)
-            if ext.lower() == '.html': default_filter = "HTML文件 (*.html)"
-            elif ext.lower() in ['.md', '.markdown']: default_filter = "Markdown文件 (*.md *.markdown)"
-        
+        # No need to check current_path for TextEditor, as it defaults to .txt if new
+
         file_name, selected_filter = QFileDialog.getSaveFileName(
             self.main_window, "另存为", os.path.join(default_dir, suggested_name),
             filters, default_filter
@@ -243,51 +230,47 @@ class FileOperations:
 
         if file_name:
             abs_file_path = os.path.abspath(file_name)
+            # Ensure correct extension based on selected filter if none provided by user
+            # This logic might need refinement if user types "myfile.other" but selects "HTML files (*.html)"
             _, current_ext = os.path.splitext(abs_file_path)
-
-            # Ensure correct extension based on selected filter if none provided
-            if not current_ext:
+            if not current_ext: # Only add extension if user didn't provide one
                 if "HTML" in selected_filter: abs_file_path += ".html"
                 elif "Markdown" in selected_filter: abs_file_path += ".md"
                 elif "文本文件" in selected_filter: abs_file_path += ".txt"
-                # else, no extension added if "所有文件" and no specific type hint
-
+            
             try:
-                current_tab_widget.setProperty("file_path", abs_file_path)
-                current_tab_widget.setProperty("is_new", False)
-                current_tab_widget.setProperty("untitled_name", None)
+                current_tab_container.setProperty("file_path", abs_file_path)
+                current_tab_container.setProperty("is_new", False)
+                current_tab_container.setProperty("untitled_name", None)
 
                 current_index = self.main_window.tab_widget.currentIndex()
-                if current_index != -1 and self.main_window.tab_widget.widget(current_index) == current_tab_widget:
+                if current_index != -1 and self.main_window.tab_widget.widget(current_index) == current_tab_container:
                     self.main_window.tab_widget.setTabText(current_index, os.path.basename(abs_file_path))
                     self.main_window.update_window_title()
                 
                 content_to_save = ""
-                is_html_editor_save = isinstance(current_tab_widget, HtmlEditor)
-                is_markdown_editor_save = isinstance(current_tab_widget, MarkdownEditorWidget)
+                if isinstance(current_tab_container, HtmlEditor):
+                    content_to_save = actual_editor_component.toPlainText()
+                elif isinstance(current_tab_container, MarkdownEditorWidget):
+                    content_to_save = actual_editor_component.toPlainText()
+                elif isinstance(current_tab_container, TextEditor):
+                     content_to_save = actual_editor_component.toPlainText()
+                else: # Fallback
+                    if hasattr(actual_editor_component, 'toPlainText'):
+                        content_to_save = actual_editor_component.toPlainText()
+                    else:
+                        raise TypeError("无法确定编辑器类型以获取内容进行另存为。")
 
-                if is_html_editor_save:
-                    self._save_html_editor_content(current_tab_widget, abs_file_path) # Async
-                    return True 
-                elif is_markdown_editor_save:
-                    content_to_save = current_tab_widget.get_content()
-                elif hasattr(editor_to_save_from, 'toPlainText'): # TextEditor
-                    content_to_save = editor_to_save_from.toPlainText()
-                else:
-                    raise TypeError("无法确定编辑器类型以获取内容进行另存为。")
-
-                # Synchronous save for Markdown and Text
                 with open(abs_file_path, 'w', encoding='utf-8') as f:
                     f.write(content_to_save)
 
-                if hasattr(editor_to_save_from, 'document'): # QMarkdownTextEdit and _InternalTextEdit have document
-                    editor_to_save_from.document().setModified(False)
+                if hasattr(actual_editor_component, 'document'):
+                    actual_editor_component.document().setModified(False)
                 
                 if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
                     self.main_window.statusBar.showMessage(f"已保存: {abs_file_path}")
                 self.main_window.update_tab_title(False)
                 return True
-
             except Exception as e:
                 QMessageBox.critical(self.main_window, "错误", f"无法另存为文件 '{abs_file_path}':\n{str(e)}")
         return False
@@ -298,18 +281,25 @@ class FileOperations:
         widget_in_tab = self.main_window.tab_widget.widget(index) # This is the container (e.g., MarkdownEditorWidget)
 
         # Get the actual editor part for isModified check (e.g., QMarkdownTextEdit)
-        # For TextEditor/HtmlEditor, widget_in_tab is the editor.
-        # For MarkdownEditorWidget, widget_in_tab.editor is the QMarkdownTextEdit.
-        editor_component = widget_in_tab
-        if isinstance(widget_in_tab, MarkdownEditorWidget):
+        # For TextEditor, widget_in_tab is TextEditor, editor_component is _InternalTextEdit.
+        # For new HtmlEditor, widget_in_tab is HtmlEditor, editor_component is source_editor (QPlainTextEdit).
+        # For MarkdownEditorWidget, widget_in_tab is MarkdownEditorWidget, editor_component is editor (QPlainTextEdit).
+        editor_component = None
+        if isinstance(widget_in_tab, TextEditor):
+            editor_component = widget_in_tab._editor
+        elif isinstance(widget_in_tab, HtmlEditor):
+            editor_component = widget_in_tab.source_editor
+        elif isinstance(widget_in_tab, MarkdownEditorWidget):
             editor_component = widget_in_tab.editor
-        
-        # Check if the component that holds the content (like QMarkdownTextEdit or HtmlEditor) is modified
+        else: # Could be a non-editor view
+            editor_component = widget_in_tab 
+
         is_modified = False
         if hasattr(editor_component, 'document') and callable(editor_component.document):
-            is_modified = editor_component.document().isModified()
-        elif hasattr(editor_component, 'isModified') and callable(editor_component.isModified): # For HtmlEditor
-            is_modified = editor_component.isModified()
+            doc = editor_component.document()
+            if doc: is_modified = doc.isModified()
+        elif hasattr(widget_in_tab, 'isModified') and callable(widget_in_tab.isModified): # Fallback for containers like old HtmlEditor
+            is_modified = widget_in_tab.isModified()
 
 
         if is_modified:
