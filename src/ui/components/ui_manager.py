@@ -267,15 +267,57 @@ class UIManager:
         self.open_view(view_name="NoteDownloader") # Assuming registered name is 'NoteDownloader'
     
     def open_pdf_preview(self, pdf_path: str):
-        """打开PDF预览对话框"""
-        # PdfViewerView is now imported at the top
+        """打开PDF预览对话框，并连接其htmlGenerated信号"""
         try:
             pdf_viewer = PdfViewerView(pdf_path, self.main_window)
-            # Connect signal using the wrapper method in MainWindow
-            pdf_viewer.convert_to_html_signal.connect(self.convert_pdf_to_html_wrapper)
+            # Connect the new signal to a handler in UIManager
+            pdf_viewer.htmlGenerated.connect(self._handle_pdf_html_generated)
             pdf_viewer.exec()
         except Exception as e:
             QMessageBox.critical(self.main_window, "错误", f"无法打开 PDF 预览: {e}")
+
+    def _handle_pdf_html_generated(self, pdf_path: str, html_content: str):
+        """处理从PdfViewerView发送的HTML内容，在编辑器中打开"""
+        if not html_content:
+            QMessageBox.warning(self.main_window, "警告", "从 PDF 提取的 HTML 内容为空。")
+            return
+
+        # Create a suitable name for the new tab
+        base_name = os.path.basename(pdf_path)
+        untitled_name = f"{os.path.splitext(base_name)[0]}.html (源码)"
+
+        # Use FileOperations to add a new HTML editor tab
+        # Ensure main_window has file_operations initialized
+        if hasattr(self.main_window, 'file_operations') and self.main_window.file_operations:
+            self.main_window.file_operations.add_editor_tab(
+                content=html_content,
+                file_path=None,  # It's unsaved initially
+                file_type='html',
+                set_current=True,
+                untitled_name=untitled_name
+            )
+            # Set base URL if HtmlEditor supports it and it's relevant
+            new_editor = self.main_window.get_current_editor_widget() # This gets the HtmlEditor container
+            if isinstance(new_editor, HtmlEditor) and hasattr(new_editor, 'setHtml'):
+                 from PyQt6.QtCore import QUrl
+                 # For PyMuPDF generated HTML with embedded images, base URL might be less critical
+                 # but setting it to the original PDF's directory is a good practice if any relative links were hypothetically present.
+                 # However, since we are opening source, it might not be needed for rendering preview within HtmlEditor.
+                 # For now, let's set it based on where the PDF was, as HtmlEditor might use it for its internal preview.
+                 pdf_dir_path = os.path.dirname(pdf_path)
+                 if not pdf_dir_path.endswith(os.path.sep):
+                     pdf_dir_path += os.path.sep
+                 base_url_for_source = QUrl.fromLocalFile(pdf_dir_path)
+                 # HtmlEditor's setHtml is called by add_editor_tab. If we need to re-set with baseUrl:
+                 # new_editor.setHtml(html_content, baseUrl=base_url_for_source) 
+                 # add_editor_tab already calls setHtml. We might need to pass baseUrl to add_editor_tab or set it after.
+                 # For now, let's assume add_editor_tab handles content correctly.
+                 # The HtmlEditor itself has a default base URL.
+
+            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                self.main_window.statusBar.showMessage(f"PDF 已转换为 HTML 源代码: {untitled_name}")
+        else:
+            QMessageBox.critical(self.main_window, "内部错误", "FileOperations 未初始化，无法打开HTML标签页。")
     
     def sidebar_item_clicked(self, item):
         """处理侧边栏项目点击事件"""
@@ -313,16 +355,22 @@ class UIManager:
          self.convert_pdf_to_html(pdf_path)
     
     def convert_pdf_to_html(self, pdf_path: str):
-        """将PDF转换为HTML并在新的HTML编辑器标签页中打开"""
-        # Correct import path for pdf_utils
+        """将PDF转换为HTML并在新的HTML编辑器标签页中打开 (This method might be redundant now or needs to be re-evaluated)"""
+        # This method was originally for a direct "Convert PDF to HTML and open in editor" action,
+        # distinct from the PDF Previewer dialog.
+        # With PdfViewerView now emitting htmlGenerated, this UIManager.convert_pdf_to_html
+        # might be invoked by a different UI action (e.g., a menu item).
+        # Its logic is very similar to _handle_pdf_html_generated.
+        # For now, ensure it uses the updated pdf_utils.extract_pdf_content signature.
+
         try:
-            from ...utils.pdf_utils import extract_pdf_content
+            from ...utils.pdf_utils import extract_pdf_content # pdf_utils.py updated to not take parent_window
         except ImportError:
             QMessageBox.critical(self.main_window, "错误", "无法导入 PDF 处理工具 (pdf_utils)。")
             return
 
         try:
-            html_content, temp_dir = extract_pdf_content(pdf_path)
+            html_content = extract_pdf_content(pdf_path) # No parent_window argument
             if not html_content:
                 QMessageBox.warning(self.main_window, "警告", "无法从 PDF 提取内容。")
                 return
@@ -340,13 +388,27 @@ class UIManager:
 
             # Get the newly created editor to set properties
             new_editor = self.main_window.get_current_editor_widget()
-            if self.is_widget_html_editor(new_editor):
+            if self.is_widget_html_editor(new_editor) and hasattr(new_editor, 'setHtml'):
+                 # The content is already set by add_editor_tab, but likely with the wrong base URL.
+                 # We need to set it again with the correct base URL for relative paths (like images).
+                 from PyQt6.QtCore import QUrl # Ensure QUrl is imported
+                 
+                 # Construct the base URL from the original PDF's directory
+                 # Ensure the path ends with a separator for QUrl.fromLocalFile to treat it as a directory.
+                 pdf_dir_path = os.path.dirname(pdf_path)
+                 if not pdf_dir_path.endswith(os.path.sep):
+                     pdf_dir_path += os.path.sep
+                 base_url_for_pdf = QUrl.fromLocalFile(pdf_dir_path)
+                 
+                 # print(f"UIManager: Setting HTML for PDF conversion with baseUrl: {base_url_for_pdf.toString()}") # Debug
+                 # It's assumed html_content variable still holds the correct HTML string here.
+                 new_editor.setHtml(html_content, baseUrl=base_url_for_pdf)
+                 
                  # Store temporary directory path if needed for cleanup later
-                 # This might be better handled elsewhere or by saving images inline
-                 new_editor.setProperty("pdf_temp_dir", temp_dir)
+                 # new_editor.setProperty("pdf_temp_dir", temp_dir) # temp_dir is no longer returned
                  new_editor.setProperty("is_pdf_converted", True)
-                 # Ensure it starts as unmodified
-                 new_editor.setModified(False)
+                 # Ensure it starts as unmodified (setHtml in HtmlEditor already does this)
+                 # new_editor.setModified(False) # Already handled by HtmlEditor.setHtml
 
             if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
                  self.main_window.statusBar.showMessage(f"已将 PDF 转换为 HTML: {file_name}")

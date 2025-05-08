@@ -7,7 +7,7 @@ from ..atomic.editor.text_editor import TextEditor
 from ..atomic.editor.html_editor import HtmlEditor
 from ..atomic.markdown_editor_widget import MarkdownEditorWidget # Import MarkdownEditorWidget
 # Assuming pdf_utils is still in src/utils
-from ...utils.pdf_utils import cleanup_temp_images
+# from ...utils.pdf_utils import cleanup_temp_images # cleanup_temp_images is no longer used
 # Import PdfViewerView for type checking or instantiation if needed elsewhere
 from ..views.pdf_viewer_view import PdfViewerView
 
@@ -313,12 +313,15 @@ class FileOperations:
             elif ret == QMessageBox.StandardButton.Cancel:
                 return False
 
-        temp_dir = widget_in_tab.property("pdf_temp_dir") # Check property on the container widget
-        if temp_dir:
-            try:
-                cleanup_temp_images(temp_dir)
-            except Exception as e:
-                print(f"清理 PDF 临时文件时出错: {e}")
+        # temp_dir = widget_in_tab.property("pdf_temp_dir") # Check property on the container widget
+        # The concept of pdf_temp_dir was related to pdf2htmlEX or older PyMuPDF image extraction.
+        # With PyMuPDF's get_text("html") embedding images, this is no longer directly managed here.
+        # if temp_dir:
+        #     try:
+        #         # cleanup_temp_images(temp_dir) # Function removed
+        #         pass # No cleanup needed here for PyMuPDF embedded HTML
+        #     except Exception as e:
+        #         print(f"清理 PDF 临时文件时出错: {e}")
 
         if self.main_window.previous_editor == editor_component: # Compare with the actual editor component
              self.main_window.previous_editor = None

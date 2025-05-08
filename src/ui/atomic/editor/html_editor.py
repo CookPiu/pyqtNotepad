@@ -62,6 +62,7 @@ class HtmlEditor(QWidget): # Changed base class from QWebEngineView
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._current_base_url = QUrl.fromLocalFile(os.getcwd() + os.path.sep) # Default base URL, ensure trailing slash
 
         # Editor part with line numbers for HTML source
         self.editor_area_widget = QWidget(self)
@@ -133,12 +134,13 @@ class HtmlEditor(QWidget): # Changed base class from QWebEngineView
         if self.is_preview_mode: # If preview is active, update it
             self._render_timer.start() 
 
-    def _update_preview_from_source(self):
+    def _update_preview_from_source(self): # Uses self._current_base_url
         html_source = self.source_editor.toPlainText()
+        # print(f"HtmlEditor: Updating preview with baseUrl: {self._current_base_url.toString()}") # Debug
         if self.preview.page():
-            self.preview.page().setHtml(html_source, QUrl.fromLocalFile(os.getcwd() + "/")) # Provide base URL for local resources
-        else:
-            self.preview.setHtml(html_source, QUrl.fromLocalFile(os.getcwd() + "/"))
+            self.preview.page().setHtml(html_source, self._current_base_url)
+        else: # Should ideally not happen if page is always available
+            self.preview.setHtml(html_source, self._current_base_url)
 
 
     def set_preview_visible(self, show_preview: bool):
@@ -161,9 +163,14 @@ class HtmlEditor(QWidget): # Changed base class from QWebEngineView
             self.view_mode_changed.emit(self.is_preview_mode)
 
     # --- Content Access Methods ---
-    def setHtml(self, html_source: str, baseUrl: QUrl = QUrl()): # Renamed from setHtml to avoid conflict
+    def setHtml(self, html_source: str, baseUrl: QUrl = QUrl()):
         self.source_editor.setPlainText(html_source)
-        self._update_preview_from_source() # Update preview
+        if baseUrl.isValid() and not baseUrl.isEmpty(): # Check if a valid, non-empty baseUrl is provided
+            self._current_base_url = baseUrl
+            # print(f"HtmlEditor: Base URL set to: {self._current_base_url.toString()}") # Debug
+        # else, it keeps the last valid one or the default from __init__
+        
+        self._update_preview_from_source() # This will now use the updated self._current_base_url
         self.source_editor.document().setModified(False)
 
 
