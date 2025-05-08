@@ -12,6 +12,9 @@ from .resizable_image_text_edit import ResizableImageTextEdit
 # Assuming ThemeManager might be needed later, e.g., for direct access
 # from ...core.theme_manager import ThemeManager # Or get_theme_manager()
 
+# Import ExpressionEvaluator from calculator_widget
+from ..mini_tools.calculator_widget import ExpressionEvaluator
+
 # --- LineNumberArea - Might need adjustments for QTextEdit ---
 class LineNumberArea(QWidget):
     """Widget to display line numbers for the text editor."""
@@ -88,6 +91,7 @@ class _InternalTextEdit(ResizableImageTextEdit):
         # Accept rich text for pasting etc.
         self.setAcceptRichText(True)
         self._setup_highlight()
+        self.evaluator = ExpressionEvaluator() # Instantiate ExpressionEvaluator
 
         # Connect signals
         self.document().blockCountChanged.connect(self.update_line_number_area_width) # Connect to document's signal
@@ -244,19 +248,51 @@ class _InternalTextEdit(ResizableImageTextEdit):
         select_all_action = menu.addAction("全选")
         select_all_action.setEnabled(True)
         select_all_action.triggered.connect(self.selectAll)
-        
-        # 添加翻译选项，只有在有选中文本时才启用
+
         has_selection = self.textCursor().hasSelection()
         if has_selection:
             menu.addSeparator()
+            # 添加翻译选项
             translate_action = menu.addAction("翻译选中内容")
-            translate_action.setEnabled(True)
             if main_window and hasattr(main_window, 'translate_selection_wrapper'):
                 translate_action.triggered.connect(main_window.translate_selection_wrapper)
             else:
+                translate_action.setEnabled(False) # Disable if no handler
                 print("Warning: Could not connect translate action to MainWindow's logic.")
+            
+            # 添加计算选中内容选项
+            calculate_action = menu.addAction("计算选中内容")
+            calculate_action.triggered.connect(self._calculate_selection)
+            # calculate_action is enabled by default if has_selection is true
 
         menu.exec(event.globalPos())
+
+    def _calculate_selection(self):
+        """Calculates the selected mathematical expression and replaces it with the result."""
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            return
+
+        selected_text = cursor.selectedText()
+        try:
+            # Sanitize common math symbols that eval might not understand directly
+            # The ExpressionEvaluator already handles ×, ÷, ^, π
+            result = self.evaluator.evaluate(selected_text)
+            
+            # Format result: remove .0 for whole numbers if possible
+            if isinstance(result, float) and result == int(result):
+                result_str = str(int(result))
+            else:
+                result_str = f"{result:g}" # Use general format for floats, or str for other types
+
+            # Append result to the original expression
+            final_text = f"{selected_text} = {result_str}"
+            cursor.insertText(final_text)
+        except Exception as e:
+            print(f"Error evaluating expression '{selected_text}': {e}")
+            # Optionally, show a QMessageBox or status bar message to the user
+            # from PyQt6.QtWidgets import QMessageBox
+            # QMessageBox.warning(self, "计算错误", f"无法计算表达式: {selected_text}\n错误: {e}")
 
     # --- Add methods to match QPlainTextEdit if needed by external code ---
     # Example: firstVisibleBlock (might behave differently)
