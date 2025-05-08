@@ -23,7 +23,15 @@ QScrollBar::handle       { background:#BFBFBF; border:none; }
 
 /* == 左侧 ActivityBar == */
 QToolBar[orientation="vertical"]
-                         { background:#F3F3F3; border:0; }
+                         { background:#F3F3F3; border:0; } 
+
+QToolBar#ActivityBarToolBar
+                         {
+                             background:#F3F3F3;
+                             border: none; /* Clear other borders */
+                             border-right: 1px solid #D0D0D0; /* Restored 1px border */
+                         }
+
 QToolBar[orientation="vertical"] QToolButton
                          { width:48px; padding:12px 0; border:none; background:transparent; }
 QToolBar[orientation="vertical"] QToolButton:hover
@@ -37,6 +45,18 @@ QListWidget,QTreeView    { border:none; background:#FFFFFF; }
 QTreeView::branch        { border-image:none; }
 QListWidget::item:selected,
 QTreeView::item:selected { background:#CBE8FF; }
+
+/* Remove direct border from QDockWidget#FileExplorerDock as it wasn't working as expected */
+QDockWidget#FileExplorerDock {
+    border: none; 
+}
+
+/* Try applying border to the FileExplorer widget itself */
+QWidget#MainFileExplorer {
+    border: none; /* Clear other borders */
+    border-right: 1px solid #D0D0D0; /* 1px border for the FileExplorer content */
+}
+
 
 /* == 工具栏 == */
 QToolBar                 { background:#FFFFFF; border-bottom:1px solid #E5E5E5; }
@@ -58,3 +78,10 @@ QMenu::separator         { height:1px; background:#C8C8C8; margin:4px 0; }
 
 /* == StatusBar == */
 QStatusBar               { background:#007ACC; color:#FFF; border:none; }
+
+/* == MainWindow Separators (between docks, toolbars, central widget) == */
+/* QMainWindow::separator style removed as it wasn't effective for all cases.
+   We are now applying borders directly to QToolBar#ActivityBarToolBar and QDockWidget#FileExplorerDock.
+   If further separators are needed for other docks (e.g., right or bottom),
+   they would need specific QSS rules targeting their objectName or class + position.
+*/

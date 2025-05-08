@@ -120,128 +120,89 @@ class UIInitializer:
         # parent_layout.addWidget(self.main_window.main_h_splitter)
 
     def _setup_activity_bar_dock(self):
-         """设置左侧活动栏 DockWidget"""
-         self.main_window.activity_bar_dock = QDockWidget("活动", self.main_window)
-         self.main_window.activity_bar_dock.setObjectName("ActivityBarDock")
-         self.main_window.activity_bar_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
-         self.main_window.activity_bar_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures) # Remove title bar, close button etc.
-
-         activity_bar_widget = QWidget()
-         activity_layout = QVBoxLayout(activity_bar_widget)
-         activity_layout.setContentsMargins(0, 5, 0, 5)
-         activity_layout.setSpacing(5)
-         activity_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-         activity_bar_widget.setMinimumWidth(40) # **Set a minimum width for the container**
+         """设置左侧活动栏 ToolBar"""
+         self.main_window.activity_bar_toolbar = QToolBar("活动栏", self.main_window)
+         self.main_window.activity_bar_toolbar.setObjectName("ActivityBarToolBar")
+         self.main_window.activity_bar_toolbar.setMovable(False)
+         self.main_window.activity_bar_toolbar.setFloatable(False)
+         self.main_window.activity_bar_toolbar.setFixedWidth(55) # Adjusted width for text buttons
+         self.main_window.activity_bar_toolbar.setStyleSheet("QToolBar { spacing: 5px; padding: 5px; }") # Add some spacing
 
          # --- Activity Bar Buttons ---
-         # Files Button (Toggles Sidebar Dock)
-         files_btn = QToolButton()
-         files_btn.setIcon(QIcon.fromTheme("folder", QIcon(":/icons/default_folder.png"))) # Add fallback icon path
-         files_btn.setToolTip("文件浏览器 (切换侧边栏)")
+         # Files Button (Toggles File Explorer Dock)
+         files_btn = QToolButton(self.main_window.activity_bar_toolbar)
+         files_btn.setText("文件")
+         files_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon) # Or ToolButtonTextOnly
+         files_btn.setToolTip("文件管理 (切换)")
          files_btn.setCheckable(True)
-         files_btn.clicked.connect(self._toggle_sidebar_dock)
-         activity_layout.addWidget(files_btn)
-         self.main_window.toggle_sidebar_button = files_btn # Store reference
+         files_btn.clicked.connect(self._toggle_sidebar_dock) # sidebar_dock is now File Explorer
+         files_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+         self.main_window.activity_bar_toolbar.addWidget(files_btn)
+         self.main_window.toggle_sidebar_button = files_btn
 
          # --- Dynamically Add Buttons for Registered Views ---
-         print("UIInitializer: Adding buttons for registered views to activity bar...")
+         print("UIInitializer: Adding buttons for registered views to activity toolbar...")
          if hasattr(self.ui_manager, 'registered_views'):
              for view_name, view_info in self.ui_manager.registered_views.items():
                  try:
-                     # Skip FileExplorer as it's handled by the sidebar toggle
-                     # Also skip PDFViewer as it's opened contextually
-                     if view_name in ["FileExplorer", "PdfViewer"]:
+                     if view_name in ["FileExplorer", "PdfViewer"]: # Skip FileExplorer and PdfViewer
                           continue
 
-                     icon_name = view_info.get("icon")
-                     icon = QIcon() # Default empty icon
-                     use_text = True # Default to using text
+                     view_btn = QToolButton(self.main_window.activity_bar_toolbar)
+                     view_btn.setToolTip(f"打开/切换到 {view_name}")
+                     button_text = view_name[:2] if len(view_name) > 2 else view_name
+                     view_btn.setText(button_text)
+                     view_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon) # Or ToolButtonTextOnly
+                     view_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
-                     if icon_name:
-                         loaded_icon = QIcon.fromTheme(icon_name)
-                         # Check if the theme icon is valid (not null)
-                         if not loaded_icon.isNull():
-                              icon = loaded_icon
-                              use_text = False
-                         # else: print(f"  Warning: Theme icon '{icon_name}' not found for {view_name}.") # Optional warning
-
-                     # If no valid icon was found, use text
-                     view_btn = QToolButton()
-                     view_btn.setToolTip(f"打开/切换到 {view_name}") # Set tooltip first
-                     if use_text:
-                         view_btn.setText(view_name[:3]) # Use first 3 chars as short text, or full name
-                         view_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly) # **Set text only style**
-                         # view_btn.setMinimumSize(30, 25) # Optional: Ensure minimum size for text buttons
-                         print(f"  Using text '{view_btn.text()}' for button: {view_name}")
-                     else:
-                         view_btn.setIcon(icon)
-                         view_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly) # Explicitly set icon only
-                         print(f"  Using icon for button: {view_name}")
-
-                     view_btn.setCheckable(False) # Keep as non-checkable for simple open action
-
-                     # Connect to open_view, prefer opening tools in docks
-                     # Use a lambda that captures the current view_name
+                     view_btn.setCheckable(False)
                      view_btn.clicked.connect(lambda checked=False, v_name=view_name: self.ui_manager.open_view(v_name, open_in_dock=True))
-
-                     activity_layout.addWidget(view_btn)
-                     print(f"  Added button for: {view_name}")
+                     
+                     self.main_window.activity_bar_toolbar.addWidget(view_btn)
+                     print(f"  Added button '{button_text}' for: {view_name}")
 
                  except Exception as e:
                       print(f"  Error adding button for view '{view_name}': {e}")
          else:
               print("UIInitializer: ui_manager has no registered_views attribute.")
 
+         # Add a spacer to push buttons to the top
+         spacer = QWidget()
+         spacer.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+         self.main_window.activity_bar_toolbar.addWidget(spacer)
 
-         activity_layout.addStretch() # Push buttons to top
-
-         self.main_window.activity_bar_dock.setWidget(activity_bar_widget)
-         self.main_window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.main_window.activity_bar_dock)
-         # self.main_window.activity_bar_dock.show() # **Explicitly show the dock (optional)**
-
-         # Set initial state (e.g., sidebar visible means button checked)
-         # This depends on whether the sidebar dock starts visible
-         # files_btn.setChecked(self.main_window.sidebar_dock.isVisible())
+         self.main_window.addToolBar(Qt.ToolBarArea.LeftToolBarArea, self.main_window.activity_bar_toolbar)
+         self.main_window.activity_bar_toolbar.show()
 
 
     def _setup_sidebar_dock(self):
-        """设置侧边栏 DockWidget (包含文件浏览器等)"""
-        self.main_window.sidebar_dock = QDockWidget("侧边栏", self.main_window)
-        self.main_window.sidebar_dock.setObjectName("SidebarDock")
+        """设置文件管理器 DockWidget"""
+        # sidebar_dock is now specifically for the File Explorer
+        self.main_window.sidebar_dock = QDockWidget("文件管理", self.main_window)
+        self.main_window.sidebar_dock.setObjectName("FileExplorerDock")
         self.main_window.sidebar_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
-        self.main_window.sidebar_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self.main_window.sidebar_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable) # Not floatable
 
-        sidebar_widget = QWidget()
-        sidebar_layout = QVBoxLayout(sidebar_widget)
-        sidebar_layout.setContentsMargins(0, 0, 0, 0)
-        sidebar_layout.setSpacing(0)
-
-        # --- Sidebar List Widget ---
-        self.main_window.sidebar_list = QListWidget()
-        self.main_window.sidebar_list.setObjectName("SidebarList")
-        self.main_window.sidebar_list.setMinimumWidth(150) # Set minimum width
-        self.main_window.sidebar_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        # Add items to sidebar
-        sidebar_items = ["文件浏览器", "计算器", "计时器", "便签与待办", "日历", "笔记下载", "语音识别"]
-        for item_text in sidebar_items:
-            item = QListWidgetItem(item_text)
-            self.main_window.sidebar_list.addItem(item)
-            
-        # 连接点击事件到UI管理器
-        self.main_window.sidebar_list.itemClicked.connect(self.ui_manager.sidebar_item_clicked)
+        # FileExplorer will be the widget for this dock
+        # Ensure FileExplorer is imported: from ..atomic.file_explorer import FileExplorer
+        self.main_window.file_explorer = FileExplorer(parent=self.main_window) # Create FileExplorer instance
+        self.main_window.file_explorer.setObjectName("MainFileExplorer")
         
-        # 添加到侧边栏布局
-        sidebar_layout.addWidget(self.main_window.sidebar_list)
+        # Set FileExplorer as the widget for the dock
+        self.main_window.sidebar_dock.setWidget(self.main_window.file_explorer)
         
-        # 设置侧边栏小部件
-        self.main_window.sidebar_dock.setWidget(sidebar_widget)
         self.main_window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.main_window.sidebar_dock)
         
-        # 连接可见性变化到活动栏按钮状态
-        self.main_window.sidebar_dock.visibilityChanged.connect(self.main_window.toggle_sidebar_button.setChecked)
-        # 根据侧边栏可见性设置初始按钮状态
-        self.main_window.toggle_sidebar_button.setChecked(self.main_window.sidebar_dock.isVisible())
+        # Connect visibility changes to the activity bar button state
+        if hasattr(self.main_window, 'toggle_sidebar_button'): # Check if button exists
+            self.main_window.sidebar_dock.visibilityChanged.connect(self.main_window.toggle_sidebar_button.setChecked)
+            # Set initial button state based on sidebar visibility (e.g., initially hidden)
+            self.main_window.toggle_sidebar_button.setChecked(self.main_window.sidebar_dock.isVisible())
+        else:
+            print("警告: toggle_sidebar_button 未在 main_window 中找到，无法连接 visibilityChanged。")
+        
+        # By default, the file explorer dock might be hidden, matching VS Code behavior
+        self.main_window.sidebar_dock.hide()
 
 
     def _toggle_sidebar_dock(self, checked):

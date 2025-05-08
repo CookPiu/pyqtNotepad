@@ -24,7 +24,15 @@ QScrollBar::handle       { background:#5A5A5A; border:none; }
 /* ===== ActivityBar ===== */
 QToolBar#qt_toolbar_ext_button,          /* VS Code 左侧活动栏的默认名字 */
 QToolBar[orientation="vertical"]         /* 任何竖放 ToolBar */
-                         { background:#333; border:0; }
+                         { background:#333; border:0; } 
+
+QToolBar#ActivityBarToolBar
+                         {
+                             background:#333;
+                             border: none; /* Clear other borders */
+                             border-right: 1px solid #2A2A2A; /* Restored 1px border */
+                         }
+
 QToolBar[orientation="vertical"] QToolButton
                          { width:48px; padding:12px 0; border:none; background:transparent; }
 QToolBar[orientation="vertical"] QToolButton:hover
@@ -35,6 +43,17 @@ QListWidget,QTreeView    { border:none; background:#1E1E1E; }
 QTreeView::branch        { border-image:none; }                   /* 去掉树枝图 */
 QListWidget::item:selected,
 QTreeView::item:selected { background:#094771; }
+
+/* Remove direct border from QDockWidget#FileExplorerDock */
+QDockWidget#FileExplorerDock {
+    border: none; 
+}
+
+/* Try applying border to the FileExplorer widget itself */
+QWidget#MainFileExplorer {
+    border: none; /* Clear other borders */
+    border-right: 1px solid #2A2A2A; /* 1px border for the FileExplorer content */
+}
 
 /* ===== 顶部工具栏 & 工具按钮 ===== */
 QToolBar                 { background:#1E1E1E; border-bottom:1px solid #2B2B2B; }
@@ -56,3 +75,8 @@ QMenu::separator         { height:1px; background:#3C3C3C; margin:4px 0; }
 
 /* ===== StatusBar ===== */
 QStatusBar               { background:#007ACC; color:#FFF; border:none; }
+
+/* == MainWindow Separators (between docks, toolbars, central widget) == */
+/* QMainWindow::separator style removed as it wasn't effective for all cases.
+   We are now applying borders directly to QToolBar#ActivityBarToolBar and QDockWidget#FileExplorerDock.
+*/

@@ -58,6 +58,72 @@
 *   **资源 (`assets/`)**: 存放静态资源，主要是样式表 (QSS) 文件，用于定义亮色和暗色主题。
 *   **笔记下载器子模块 (`note_downloader/`)**: 这是一个相对独立的Python项目，作为子模块集成到主应用中。它有自己的依赖、配置和源代码结构，负责从Moodle等平台自动下载课程资料。主应用通过 `src/ui/views/note_downloader_view.py` 与其交互。
 
+以下是软件架构的简化示意图：
+
+```mermaid
+graph TD
+    A[main.py 应用入口] --> B(MainWindow 主窗口);
+
+    subgraph src [主应用源码]
+        direction TB
+
+        subgraph ui [UI层 src/ui]
+            direction LR
+            B --> UIManager[UI管理器 ui_manager.py];
+            UIManager --> UICore[UI核心 ui/core];
+            UIManager --> Atomic[原子组件 ui/atomic];
+            UIManager --> Composite[复合组件 ui/composite];
+            UIManager --> Docks[可停靠组件 ui/docks];
+            UIManager --> Views[视图 ui/views];
+            UIManager --> Dialogs[对话框 ui/dialogs];
+            B --> UIOps[UI操作逻辑 ui/components]; %% UIOps directly used by MainWindow or coordinated by UIManager
+        end
+
+        subgraph core_services [核心与服务层]
+            direction LR
+            subgraph core [核心功能 src/core]
+                B --> AppLogic[应用逻辑 app.py];
+                AppLogic --> Settings[设置 settings.py];
+            end
+
+            subgraph services [服务层 src/services]
+                B --> FileService[文件服务];
+                B --> FormatService[格式服务];
+                B --> TextService[文本服务];
+                B --> TranslationService[翻译服务];
+            end
+        end
+
+        subgraph utils [工具类 src/utils]
+            B --> PdfUtils[PDF工具 pdf_utils.py];
+        end
+    end
+
+    subgraph other [其他模块与数据]
+        direction TB
+        subgraph data_assets [数据与资源]
+            direction LR
+            UserData[用户数据 data/] <--> AppLogic;
+            Assets[资源 assets/] <--> UICore;
+        end
+
+        subgraph note_downloader_module [笔记下载器子模块 note_downloader/]
+            NoteDownloaderView[NoteDownloaderView (in src/ui/views)] --> NoteDownloaderCore[note_downloader/src (子模块核心)];
+            B --> NoteDownloaderView;
+        end
+    end
+
+    classDef default fill:#fff,stroke:#333,stroke-width:1px,color:#333;
+    classDef entrypoint fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef maincomponent fill:#ccf,stroke:#333,stroke-width:2px;
+    classDef submodule fill:#lightgrey,stroke:#333,stroke-width:2px;
+    classDef datastore fill:#f8c471,stroke:#333,stroke-width:1px;
+
+    class A entrypoint;
+    class B,UIManager,AppLogic,FileService,FormatService,TextService,TranslationService,PdfUtils,NoteDownloaderView,UIOps maincomponent;
+    class NoteDownloaderCore submodule;
+    class UserData,Assets datastore;
+```
 
 ## 项目结构
 
@@ -96,7 +162,7 @@ pyqtNotepad/
 ├── src/                     # 源代码目录
 │   ├── __init__.py          # 使 src 成为一个包
 │   ├── core/                # 核心功能
-│   │   ├── __init__.py
+│   │   ├── __init__.py__
 │   │   ├── app.py           # 应用程序核心逻辑
 │   │   └── settings.py      # 应用程序设置管理
 │   ├── services/            # 服务层
