@@ -298,7 +298,7 @@ class PdfViewerView(BaseDialog):
             # Dynamic zoom calculation
             screen = QApplication.primaryScreen()
             if screen: # Ensure screen is available (it should be in a GUI app)
-                device_pix_ratio = screen.devicePixelRatioF() # Use F version for float, more precise
+                device_pix_ratio = screen.devicePixelRatio() # Use F version for float, more precise
             else:
                 device_pix_ratio = 1.0 # Fallback
 
@@ -311,8 +311,10 @@ class PdfViewerView(BaseDialog):
             else:
                 base_zoom = 1.5 # Fallback if page width is zero
 
-            # Ensure a minimum zoom and apply device pixel ratio for sharpness
-            zoom = max(1.5, base_zoom) * device_pix_ratio 
+            # Apply device pixel ratio for sharpness.
+            # base_zoom calculates the scaling to fit the width.
+            # Multiplying by device_pix_ratio aims to render at native resolution for the target logical size.
+            zoom = base_zoom * device_pix_ratio
             # Cap zoom to a reasonable maximum to prevent excessive memory usage if needed, e.g., zoom = min(zoom, 5.0)
             
             mat = fitz.Matrix(zoom, zoom)
@@ -331,7 +333,10 @@ class PdfViewerView(BaseDialog):
             if img.isNull():
                  self.image_display_label.setText(f"无法渲染第 {page_num + 1} 页 (QImage为空)")
                  return
-            self.image_display_label.setPixmap(QPixmap.fromImage(img))
+            
+            q_pixmap = QPixmap.fromImage(img)
+            q_pixmap.setDevicePixelRatio(device_pix_ratio if screen else 1.0) # Set DPR for the pixmap
+            self.image_display_label.setPixmap(q_pixmap)
             self.current_page_for_images = page_num
             self.update_image_page_label()
             self._update_image_button_states()
