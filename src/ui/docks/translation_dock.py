@@ -382,15 +382,29 @@ class TranslationDockWidget(QDockWidget):
         from_lang = self.from_lang_combo.currentData()
         to_lang = self.to_lang_combo.currentData()
         
-        # 执行翻译
-        success, result, _ = self.translation_service.translate(
-            text, from_lang, to_lang
-        )
+        # 显示加载状态
+        self.result_text.setPlainText("正在翻译...")
+        self.translate_button.setEnabled(False)
         
-        if success:
-            self.result_text.setPlainText(result)
-        else:
-            QMessageBox.warning(self, "翻译错误", result)
+        # 执行异步翻译
+        def on_translation_complete(success, result, _):
+            # 此回调现在会在主线程中执行，因为我们使用了信号机制
+            try:
+                # 检查控件是否仍然存在
+                if self.isVisible() and not self.isHidden():
+                    self.translate_button.setEnabled(True)
+                    if success:
+                        self.result_text.setPlainText(result)
+                    else:
+                        self.result_text.setPlainText("")
+                        QMessageBox.warning(self, "翻译错误", result)
+            except Exception as e:
+                print(f"更新翻译UI时出错: {e}")
+        
+        # 使用异步API
+        self.translation_service.translate_async(
+            text, from_lang, to_lang, on_translation_complete
+        )
     
     def copy_result(self):
         """复制翻译结果到剪贴板"""
@@ -407,27 +421,64 @@ class TranslationDockWidget(QDockWidget):
     def apply_to_editor(self):
         """将翻译结果应用到编辑器"""
         result = self.result_text.toPlainText()
-        if result and self.parent():
-            # 尝试获取主窗口的当前编辑器
-            editor = None
+        if not result:
+            QMessageBox.warning(self, "应用失败", "没有翻译结果可应用")
+            return
+            
+        if not self.parent():
+            QMessageBox.warning(self, "应用失败", "无法获取主窗口")
+            return
+            
+        # 尝试获取主窗口的当前编辑器
+        editor = None
+        try:
             if hasattr(self.parent(), 'get_current_editor_widget'):
                 editor = self.parent().get_current_editor_widget()
                 
-            if editor and hasattr(editor, 'textCursor') and hasattr(editor, 'insertPlainText'):
+            if editor:
+                # 检查是否为HTML编辑器
+                if editor.__class__.__name__ == 'HtmlEditor':
+                    try:
+                        # 检查是否有apply_translation_result方法
+                        if hasattr(editor, 'apply_translation_result'):
+                            # 直接调用HTML编辑器的应用翻译结果方法
+                            success = editor.apply_translation_result(result)
+                            if not success:
+                                QMessageBox.warning(self, "应用失败", "无法将翻译结果应用到HTML编辑器")
+                        else:
+                            QMessageBox.warning(self, "应用失败", "HTML编辑器不支持应用翻译结果")
+                        return
+                    except Exception as e:
+                        print(f"应用翻译结果到HTML编辑器时出错: {e}")
+                        QMessageBox.warning(self, "应用失败", f"应用翻译结果时出错: {str(e)}")
+                        return
+            
+            # 原有的文本编辑器处理逻辑
+            if hasattr(editor, 'textCursor'):
                 cursor = editor.textCursor()
                 if cursor.hasSelection():
                     cursor.removeSelectedText()
-                cursor.insertText(result)
+                    
+                # 检测编辑器类型并使用适当的方法插入文本
+                if hasattr(editor, 'insertHtml') and hasattr(editor, 'document') and hasattr(editor.document(), 'isHtml'):
+                    # 如果编辑器支持HTML并且当前文档是HTML格式
+                    if editor.document().isHtml():
+                        # 对HTML内容进行转义，避免破坏HTML结构
+                        import html
+                        escaped_result = html.escape(result)
+                        cursor.insertHtml(escaped_result)
+                        return
+                        
+                # 默认使用纯文本插入
+                cursor.insertText(result)  # 修改这里，使用insertText而不是insertPlainText
             else:
                 QMessageBox.warning(
                     self, "应用失败", 
-                    "无法将翻译结果应用到编辑器，请手动复制"
+                    "编辑器不支持文本操作，请手动复制"
                 )
-        else:
-            QMessageBox.warning(
-                self, "应用失败", 
-                "没有翻译结果或编辑器不可用"
-            )
+        except Exception as e:
+            print(f"应用翻译结果时出错: {e}")
+            QMessageBox.warning(self, "应用失败", f"应用翻译结果时出错: {str(e)}")
     
     def load_credentials(self):
         """加载API凭据（现在由TranslationService负责）"""
@@ -505,4 +556,4 @@ class TranslationDockWidget(QDockWidget):
         """显示窗口时如果选中了实时功能，重新启动定时器"""
         if self.live_selection:
             self.selection_timer.start()
-        super().showEvent(event) 
+        super().showEvent(event)

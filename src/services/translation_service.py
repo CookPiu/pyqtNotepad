@@ -1,10 +1,15 @@
-import hashlib
-import random
-import requests
-import json
+# -*- coding: utf-8 -*-
+"""
+翻译服务 - 使用异步后端处理翻译请求
+"""
 import os
-from typing import Dict, Optional, Tuple
+import json
+import random
+import hashlib
+import requests
+from typing import Dict, Tuple, Optional, List, Callable
 
+from .translation_backend import get_translation_backend
 
 class TranslationService:
     """百度翻译API服务"""
@@ -46,6 +51,8 @@ class TranslationService:
         """
         self.app_id = app_id
         self.app_secret = app_secret
+        self.backend = get_translation_backend()
+        self.current_request_id = None
         
         # 创建API凭据目录（如果不存在）
         os.makedirs(self.API_CREDENTIALS_DIR, exist_ok=True)
@@ -53,6 +60,10 @@ class TranslationService:
         # 如果没有提供凭据，尝试从文件加载
         if not (app_id and app_secret):
             self.load_credentials_from_file()
+            
+        # 同步后端凭据
+        if self.has_credentials():
+            self.backend.set_credentials(self.app_id, self.app_secret)
         
     def set_credentials(self, app_id: str, app_secret: str) -> None:
         """
@@ -64,6 +75,8 @@ class TranslationService:
         """
         self.app_id = app_id
         self.app_secret = app_secret
+        # 同步到后端
+        self.backend.set_credentials(app_id, app_secret)
         
     def has_credentials(self) -> bool:
         """检查是否已设置凭据"""
@@ -119,6 +132,10 @@ class TranslationService:
             self.app_id = credentials.get("app_id", "")
             self.app_secret = credentials.get("app_secret", "")
             
+            # 同步到后端
+            if self.has_credentials():
+                self.backend.set_credentials(self.app_id, self.app_secret)
+                
             return self.has_credentials()
         except Exception as e:
             print(f"加载API凭据失败: {e}")
@@ -130,7 +147,7 @@ class TranslationService:
         
     def translate(self, text: str, from_lang: str = "auto", to_lang: str = "zh") -> Tuple[bool, str, Optional[Dict]]:
         """
-        翻译文本
+        翻译文本（同步方法，保留向后兼容性）
         
         Args:
             text: 要翻译的文本
@@ -176,6 +193,80 @@ class TranslationService:
                 
         except Exception as e:
             return False, f"翻译请求错误: {str(e)}", None
+    
+    # 在 translate_async 方法中，确保回调函数在主线程中执行
+    
+    def translate_async(self, text: str, from_lang: str = "auto", to_lang: str = "zh", 
+                   callback: Callable[[bool, str, Optional[Dict]], None] = None) -> str:
+        """
+        异步翻译文本
+        
+        Args:
+            text: 要翻译的文本
+            from_lang: 源语言代码，默认为自动检测
+            to_lang: 目标语言代码，默认为中文
+            callback: 翻译完成后的回调函数，接收参数(成功状态, 翻译结果或错误消息, 原始响应数据)
+            
+        Returns:
+            请求ID，可用于取消请求
+        """
+        # 取消之前的请求（如果有）
+        if self.current_request_id:
+            self.cancel_translation()
+            
+        # 使用后端进行异步翻译
+        self.current_request_id = self.backend.translate_async(text, from_lang, to_lang, callback)
+        return self.current_request_id
+        try:
+            if not self.has_credentials():
+                if callback:
+                    try:
+                        callback(False, "未设置百度翻译API凭据", None)
+                    except Exception as e:
+                        print(f"回调函数执行错误: {e}")
+                return ""
+                
+            if not text:
+                if callback:
+                    try:
+                        callback(False, "未提供要翻译的文本", None)
+                    except Exception as e:
+                        print(f"回调函数执行错误: {e}")
+                return ""
+                
+            # 确保后端已初始化
+            if not self.backend:
+                self.backend = get_translation_backend()
+                if self.has_credentials():
+                    self.backend.set_credentials(self.app_id, self.app_secret)
+                    
+            # 使用后端服务进行异步翻译
+            request_id = self.backend.translate_async(text, from_lang, to_lang, callback)
+            self.current_request_id = request_id
+            return request_id
+        except Exception as e:
+            # 捕获所有异常，确保不会导致应用崩溃
+            error_msg = f"翻译服务异常: {str(e)}"
+            print(error_msg)
+            if callback:
+                try:
+                    callback(False, error_msg, None)
+                except Exception as cb_err:
+                    print(f"回调函数执行错误: {cb_err}")
+            return ""
+    
+    def cancel_translation(self) -> bool:
+        """
+        取消当前的翻译请求
+        
+        Returns:
+            是否成功取消
+        """
+        if self.current_request_id:
+            result = self.backend.cancel_request(self.current_request_id)
+            self.current_request_id = None
+            return result
+        return False
             
     def get_error_message(self, error_code: str) -> str:
         """根据错误代码返回友好的错误消息"""
@@ -194,4 +285,4 @@ class TranslationService:
             "58002": "服务当前已关闭，请前往百度翻译开放平台开启服务",
         }
         
-        return error_messages.get(error_code, f"未知错误 (代码: {error_code})") 
+        return error_messages.get(error_code, f"未知错误 (代码: {error_code})")

@@ -287,6 +287,8 @@ class TranslationDialog(QDialog):
             self.source_text.setPlainText(result)
             self.result_text.setPlainText(source)
     
+    # 在现有的translate_text方法中修改为异步调用
+    
     def translate_text(self):
         """执行翻译"""
         text = self.source_text.toPlainText().strip()
@@ -306,15 +308,24 @@ class TranslationDialog(QDialog):
         from_lang = self.from_lang_combo.currentData()
         to_lang = self.to_lang_combo.currentData()
         
-        # 执行翻译
-        success, result, _ = self.translation_service.translate(
-            text, from_lang, to_lang
-        )
+        # 显示加载状态
+        self.result_text.setPlainText("正在翻译...")
+        self.translate_button.setEnabled(False)
         
-        if success:
-            self.result_text.setPlainText(result)
-        else:
-            QMessageBox.warning(self, "翻译错误", result)
+        # 执行异步翻译
+        def on_translation_complete(success, result, _):
+            # 在UI线程中更新结果
+            self.translate_button.setEnabled(True)
+            if success:
+                self.result_text.setPlainText(result)
+            else:
+                self.result_text.setPlainText("")
+                QMessageBox.warning(self, "翻译错误", result)
+        
+        # 使用异步API
+        self.translation_service.translate_async(
+            text, from_lang, to_lang, on_translation_complete
+        )
     
     def copy_result(self):
         """复制翻译结果到剪贴板"""
@@ -331,28 +342,73 @@ class TranslationDialog(QDialog):
     def apply_to_editor(self):
         """将翻译结果应用到编辑器"""
         result = self.result_text.toPlainText()
-        if result and self.parent():
-            # 尝试获取主窗口的当前编辑器
-            editor = None
+        if not result:
+            QMessageBox.warning(self, "应用失败", "没有翻译结果可应用")
+            return
+            
+        if not self.parent():
+            QMessageBox.warning(self, "应用失败", "无法获取主窗口")
+            return
+            
+        # 尝试获取主窗口的当前编辑器
+        editor = None
+        try:
             if hasattr(self.parent(), 'get_current_editor_widget'):
                 editor = self.parent().get_current_editor_widget()
                 
-            if editor and hasattr(editor, 'textCursor') and hasattr(editor, 'insertPlainText'):
-                cursor = editor.textCursor()
-                if cursor.hasSelection():
-                    cursor.removeSelectedText()
-                cursor.insertText(result)
-                self.accept()  # 关闭对话框
+            if not editor:
+                QMessageBox.warning(self, "应用失败", "无法获取当前编辑器")
+                return
+                
+            # 检查是否为HTML编辑器
+            if editor.__class__.__name__ == 'HtmlEditor':
+                try:
+                    # 检查是否有apply_translation_result方法
+                    if hasattr(editor, 'apply_translation_result'):
+                        # 直接调用HTML编辑器的应用翻译结果方法
+                        success = editor.apply_translation_result(result)
+                        if success:
+                            self.accept()  # 关闭对话框
+                        else:
+                            QMessageBox.warning(self, "应用失败", "无法将翻译结果应用到HTML编辑器")
+                        return
+                except Exception as e:
+                    print(f"应用翻译结果到HTML编辑器时出错: {e}")
+                    QMessageBox.warning(self, "应用失败", f"应用翻译结果时出错: {str(e)}")
+                    return
+            
+            # 原有的文本编辑器处理逻辑
+            if hasattr(editor, 'textCursor'):
+                try:
+                    cursor = editor.textCursor()
+                    if cursor.hasSelection():
+                        cursor.removeSelectedText()
+                        
+                    # 检测编辑器类型并使用适当的方法插入文本
+                    if hasattr(editor, 'insertHtml') and hasattr(editor, 'document') and hasattr(editor.document(), 'isHtml'):
+                        # 如果编辑器支持HTML并且当前文档是HTML格式
+                        if editor.document().isHtml():
+                            # 对HTML内容进行转义，避免破坏HTML结构
+                            import html
+                            escaped_result = html.escape(result)
+                            cursor.insertHtml(escaped_result)
+                            self.accept()  # 关闭对话框
+                            return
+                            
+                    # 默认使用纯文本插入
+                    cursor.insertText(result)  # 修改这里，使用insertText而不是insertPlainText
+                    self.accept()  # 关闭对话框
+                except Exception as e:
+                    print(f"应用翻译结果到文本编辑器时出错: {e}")
+                    QMessageBox.warning(self, "应用失败", f"应用翻译结果时出错: {str(e)}")
             else:
                 QMessageBox.warning(
                     self, "应用失败", 
-                    "无法将翻译结果应用到编辑器，请手动复制"
+                    "编辑器不支持文本操作，请手动复制"
                 )
-        else:
-            QMessageBox.warning(
-                self, "应用失败", 
-                "没有翻译结果或编辑器不可用"
-            )
+        except Exception as e:
+            print(f"应用翻译结果时出错: {e}")
+            QMessageBox.warning(self, "应用失败", f"应用翻译结果时出错: {str(e)}")
     
     def load_credentials(self):
         """从设置加载API凭据"""
@@ -383,7 +439,7 @@ class APIConfigDialog(QDialog):
         # APP ID输入
         self.app_id_label = QLabel("APP ID:")
         self.app_id_input = QLineEdit()
-        self.app_id_input.setPlaceholderText("输入百度翻译API的APP ID")
+        self.app_id_input.setPlaceholderText("输入API的APP ID")
         self.app_id_input.setText(self.app_id)
         layout.addWidget(self.app_id_label, 0, 0)
         layout.addWidget(self.app_id_input, 0, 1)
@@ -391,7 +447,7 @@ class APIConfigDialog(QDialog):
         # API密钥输入
         self.app_secret_label = QLabel("API密钥:")
         self.app_secret_input = QLineEdit()
-        self.app_secret_input.setPlaceholderText("输入百度翻译API的密钥")
+        self.app_secret_input.setPlaceholderText("输入API的密钥")
         self.app_secret_input.setText(self.app_secret)
         self.app_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
         layout.addWidget(self.app_secret_label, 1, 0)
@@ -476,4 +532,4 @@ class APIConfigDialog(QDialog):
         return {
             "app_id": self.app_id_input.text().strip(),
             "app_secret": self.app_secret_input.text().strip()
-        } 
+        }

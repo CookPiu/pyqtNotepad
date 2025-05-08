@@ -257,7 +257,7 @@ class HtmlEditor(QWebEngineView):
                         customMenu.remove(); // 关闭菜单
                         
                         // 通过QWebChannel调用Python中的翻译方法
-                        // 使用异步方式安全地调用Python侧方法
+                        # 使用异步方式安全地调用Python侧方法
                         const callbackFunction = function() {
                             if (window.qt && window.qt.webChannelTransport) {
                                 // 触发全局事件，让Python端处理
@@ -393,6 +393,48 @@ class HtmlEditor(QWebEngineView):
             
             # 调用翻译方法
             main_window.translate_selection_wrapper()
+            
+    def apply_translation_result(self, text):
+        """应用翻译结果到HTML编辑器
+        
+        此方法由TranslationDialog或TranslationDockWidget调用，
+        用于将翻译结果直接应用到HTML编辑器中。
+        """
+        try:
+            # 对文本进行HTML转义，避免破坏HTML结构
+            import html
+            escaped_text = html.escape(text)
+            
+            # 使用JavaScript在编辑器中插入文本
+            js_code = f"""
+            (function() {{
+                var selection = window.getSelection();
+                if (selection.rangeCount > 0) {{
+                    var range = selection.getRangeAt(0);
+                    range.deleteContents();
+                    
+                    // 创建文本节点并插入
+                    var textNode = document.createTextNode("{escaped_text}");
+                    range.insertNode(textNode);
+                    
+                    // 重置选区
+                    selection.removeAllRanges();
+                    return true;
+                }} else {{
+                    // 如果没有选区，尝试在光标位置插入
+                    document.execCommand('insertText', false, "{escaped_text}");
+                    return true;
+                }}
+                return false;
+            }})()
+            """
+            
+            # 执行JavaScript代码
+            self.page().runJavaScript(js_code)
+            return True
+        except Exception as e:
+            print(f"在HTML编辑器中应用翻译结果时出错: {e}")
+            return False
 
     def run_js(self, script: str, callback=None):
         """Executes JavaScript code in the context of the page."""
