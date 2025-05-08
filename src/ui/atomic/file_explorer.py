@@ -87,7 +87,7 @@ class FileExplorer(BaseWidget):
                 background-color: {bg_color};
                 color: {text_color};
                 border: none; /* Remove border from treeview itself */
-                font-size: 12px;
+                /* font-size: 12px; */ /* Removed hardcoded font-size to allow global/programmatic scaling */
             }}
             QTreeView::item {{
                 padding: 3px 0px; /* Adjust vertical padding */

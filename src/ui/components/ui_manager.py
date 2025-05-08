@@ -37,14 +37,41 @@ class UIManager:
         self.register_view(TimerWidget, "计时器")
     
     def apply_current_theme(self):
-        """应用当前主题到UI组件"""
-        # Theme application might be more complex now, involving child widgets
-        # This method might need access to the ThemeManager instance
-        # theme_manager is now initialized in __init__
-        style_sheet = self.theme_manager.get_current_style_sheet()
-        if style_sheet: # Check if stylesheet loaded correctly
-            # Append QDockWidget border style
-            dock_widget_style = """
+        """应用当前主题和缩放级别到UI组件"""
+        # theme_manager is initialized in __init__
+        base_style_sheet = self.theme_manager.get_current_style_sheet()
+        if not base_style_sheet: # Check if stylesheet loaded correctly
+            print("警告: 未能加载基础样式表，无法应用主题。")
+            return
+
+        # --- Zoom Logic ---
+        effective_font_size = self.main_window.base_font_size_pt * self.main_window.current_zoom_factor
+        # Ensure font size is not excessively small
+        effective_font_size = max(1.0, effective_font_size) # Minimum 1pt
+        
+        font_rules_str = (
+            f"QWidget {{ font-size: {effective_font_size:.1f}pt; }}\n"
+            f"QToolButton {{ font-size: {effective_font_size:.1f}pt; }}\n"
+            f"QMenu {{ font-size: {effective_font_size:.1f}pt; }}\n"
+            f"QMenuBar {{ font-size: {effective_font_size:.1f}pt; }}\n"
+            f"QStatusBar {{ font-size: {effective_font_size:.1f}pt; }}\n"
+            f"QTreeView {{ font-size: {effective_font_size:.1f}pt; }}\n"
+            f"QTreeView::item {{ font-size: {effective_font_size:.1f}pt; }}\n"
+            f"QListWidget {{ font-size: {effective_font_size:.1f}pt; }}\n"
+            f"QListWidget::item {{ font-size: {effective_font_size:.1f}pt; }}\n"
+            f"QToolBar#ActivityBarToolBar QToolButton {{ font-size: {effective_font_size:.1f}pt; }}\n" # Highly specific rule for activity bar buttons
+        )
+        # Note: If style_light.qss contains "QToolBar[orientation=\"vertical\"] QToolButton { font-size: 9pt; }"
+        # that rule might override the global QWidget font-size for those specific buttons due to specificity.
+        # For true proportional scaling of those buttons, that specific rule in style_light.qss
+        # would ideally be removed or also dynamically adjusted.
+        # For now, we proceed with prepending the global font rule.
+
+        # --- Combine Styles ---
+        # Prepend font rule, then add base stylesheet, then dock widget style
+        
+        # Append QDockWidget border style (as before)
+        dock_widget_style = """
             QDockWidget {
                 border: 1px solid #A9A9A9; /* DarkGray border for visibility */
             }
@@ -55,26 +82,121 @@ class UIManager:
             QSplitter::handle:hover {
                 background-color: #BEBEBE; /* Slightly darker gray on hover */
             }
-            """
-            # It's generally better to add to existing styles rather than overwrite if possible,
-            # but QWidget.setStyleSheet usually replaces.
-            # If theme files are comprehensive, this might override some specific settings.
-            # For now, we append. If issues arise, one might need to parse and merge QSS.
-            # A simpler approach for now is to prepend, so specific styles in file can override.
-            # Or, ensure the QSS files themselves include these.
-            # Given we are adding a general rule, appending should be fine.
-            
-            # Let's try prepending to allow theme file to override if it has more specific dock styles
-            # combined_style_sheet = dock_widget_style + style_sheet 
-            # Actually, appending is safer if the theme file might not end with a newline or could have comments at the end.
-            # And if the theme file already styles QDockWidget, this will override it.
-            # Let's assume the theme files do not have overly specific QDockWidget border styles that we want to keep.
-            
-            final_style_sheet = style_sheet + dock_widget_style
-            self.main_window.setStyleSheet(final_style_sheet)
-        else:
-            print("警告: 未能加载样式表，无法应用主题。")
+        """ # Corrected indentation for closing triple quotes
+        # It's generally better to add to existing styles rather than overwrite if possible,
+        # but QWidget.setStyleSheet usually replaces.
+        # If theme files are comprehensive, this might override some specific settings.
+        # For now, we append. If issues arise, one might need to parse and merge QSS.
+        # A simpler approach for now is to prepend, so specific styles in file can override.
+        
+        # Prepend font rules to the base style sheet
+        style_sheet_with_zoom = font_rules_str + base_style_sheet
+        
+        final_style_sheet = style_sheet_with_zoom + dock_widget_style
+        self.main_window.setStyleSheet(final_style_sheet)
+        # print(f"Applied Stylesheet with Zoom (Effective Font Size: {effective_font_size:.1f}pt):\n{final_style_sheet[:300]}...") # Debug: print start of stylesheet
 
+        # --- Programmatically set font for widgets not reliably styled by QSS font-size ---
+        from PyQt6.QtGui import QFont
+        from PyQt6.QtWidgets import QToolButton, QTreeView # Ensure QToolButton is imported if not already
+
+        # File Explorer (QTreeView)
+        if hasattr(self.main_window, 'file_explorer') and self.main_window.file_explorer:
+            try:
+                current_tree_font = self.main_window.file_explorer.font()
+                current_tree_font.setPointSizeF(effective_font_size)
+                self.main_window.file_explorer.setFont(current_tree_font)
+                # print(f"Programmatically set font for FileExplorer to {effective_font_size:.1f}pt")
+            except Exception as e:
+                print(f"Error setting font programmatically for FileExplorer: {e}")
+
+        # Activity Bar Buttons (QToolButtons in activity_bar_toolbar)
+        if hasattr(self.main_window, 'activity_bar_toolbar') and self.main_window.activity_bar_toolbar:
+            toolbar = self.main_window.activity_bar_toolbar
+
+            # Dynamically set the width of the activity bar toolbar
+            original_toolbar_width_design = 60 # Original fixed width from UIInitializer
+            width_scale_factor = 1.0
+            if self.main_window.base_font_size_pt > 0: # Avoid division by zero
+                width_scale_factor = effective_font_size / self.main_window.base_font_size_pt
+            
+            scaled_toolbar_width = int(round(original_toolbar_width_design * width_scale_factor))
+            
+            min_toolbar_width = 40  # Minimum reasonable width
+            max_toolbar_width = 150 # Maximum reasonable width
+            scaled_toolbar_width = max(min_toolbar_width, min(scaled_toolbar_width, max_toolbar_width))
+            
+            toolbar.setFixedWidth(scaled_toolbar_width)
+            # print(f"  UIManager: ActivityBarToolBar width set to {scaled_toolbar_width}px (factor {width_scale_factor:.2f})")
+
+            print(f"UIManager: Processing ActivityBarToolBar (width: {scaled_toolbar_width}px). Target font size: {effective_font_size:.1f}pt")
+            try:
+                # Try setting font on the toolbar itself first
+                current_toolbar_font = toolbar.font()
+                current_toolbar_font.setPointSizeF(effective_font_size)
+                toolbar.setFont(current_toolbar_font)
+                # print(f"  Programmatically set font for ActivityBarToolBar object to {effective_font_size:.1f}pt")
+
+                activity_buttons = toolbar.findChildren(QToolButton)
+                if not activity_buttons:
+                    print("  UIManager: No QToolButtons found in activity_bar_toolbar.")
+                else:
+                    print(f"  UIManager: Found {len(activity_buttons)} QToolButtons in activity_bar_toolbar. Setting font...")
+                
+                for button_idx, button in enumerate(activity_buttons):
+                    original_button_font_family = button.font().family()
+                    original_button_font_size = button.font().pointSizeF()
+                    print(f"    Button {button_idx} ('{button.text()}'): Original font: size {original_button_font_size:.1f}pt, family '{original_button_font_family}'")
+                    
+                    # Create a new QFont object instead of modifying a copy of the button's current font
+                    new_font = QFont(original_button_font_family) # Preserve original family
+                    new_font.setPointSizeF(effective_font_size)
+                    
+                    button.setFont(new_font)
+                    
+                    font_after_set = button.font()
+                    print(f"    Button {button_idx} ('{button.text()}'): Target {effective_font_size:.1f}pt. Actual new font: size {font_after_set.pointSizeF():.1f}pt, family '{font_after_set.family()}'")
+
+                    button.updateGeometry()
+                    # button.adjustSize() # This might be problematic if the toolbar width is strictly controlled
+
+                if activity_buttons:
+                    print(f"  Programmatically processed fonts for {len(activity_buttons)} Activity Bar buttons.")
+            except Exception as e:
+                print(f"  Error setting font programmatically for Activity Bar buttons: {e}")
+        else:
+            print("UIManager: activity_bar_toolbar not found or is None.")
+
+        # Status Bar
+        if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+            status_bar = self.main_window.statusBar
+            try:
+                current_msg = status_bar.currentMessage()
+                
+                current_statusbar_font = status_bar.font()
+                new_statusbar_font = QFont(current_statusbar_font)
+                new_statusbar_font.setPointSizeF(effective_font_size)
+                status_bar.setFont(new_statusbar_font)
+                
+                # Re-show the message to force re-render with the new font
+                # Or simply repaint if no message or if showMessage causes issues with temporary messages
+                if current_msg:
+                    status_bar.showMessage(current_msg) 
+                else:
+                    # If there was no message, ensure a repaint still happens
+                    status_bar.repaint()
+                
+                # Try to force layout update
+                status_bar.adjustSize()
+                if status_bar.layout(): # Check if layout exists
+                    status_bar.layout().activate()
+
+                print(f"  UIManager: Programmatically set font for StatusBar to {effective_font_size:.1f}pt. Actual: {status_bar.font().pointSizeF():.1f}pt")
+            except Exception as e:
+                print(f"  Error setting font programmatically for StatusBar: {e}")
+        else:
+            print("UIManager: statusBar not found or is None.")
+        
         # Propagate theme update to all relevant children managed by UIManager
         is_dark = self.theme_manager.is_dark_theme()
         # Update docks, tabs, etc.

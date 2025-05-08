@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QH
                              QTextEdit, QListWidget, QListWidgetItem, QToolBar, QMenuBar, QMenu,
                              QStatusBar, QFileDialog, QFontDialog, QColorDialog, QMessageBox,
                               QInputDialog, QSplitter, QTabWidget, QToolButton, QDockWidget, QMenu, QSizePolicy)
-from PyQt6.QtGui import QAction, QFont, QColor, QTextCursor, QIcon, QImage, QTextDocument, QPainter # Removed leading space
+from PyQt6.QtGui import QAction, QFont, QColor, QTextCursor, QIcon, QImage, QTextDocument, QPainter, QKeyEvent # Removed leading space, Added QKeyEvent
 from PyQt6.QtCore import Qt, QSize, QUrl, QRect, QEvent, pyqtSignal, QPointF, QFile, QTextStream, QPoint, QSignalBlocker, QDateTime, QTimer # Import QTimer
 
 # --- Corrected Relative Imports ---
@@ -39,6 +39,13 @@ class MainWindow(QMainWindow):
         self.ui_manager = UIManager(self)
         self.file_operations = FileOperations(self, self.ui_manager)
         self.edit_operations = EditOperations(self, self.ui_manager)
+
+        # --- Zoom Attributes ---
+        self.base_font_size_pt = 10.0 # Base font size in points
+        self.current_zoom_factor = 1.0
+        self.zoom_step = 0.1
+        self.min_zoom_factor = 0.5
+        self.max_zoom_factor = 3.0
         self.view_operations = ViewOperations(self, self.ui_manager)
 
         # --- Create TabWidget directly in MainWindow ---
@@ -179,6 +186,11 @@ class MainWindow(QMainWindow):
         # Sidebar toggle might be a direct button or menu item handled by ViewOperations/UIManager
         # self.toggle_sidebar_action = QAction("切换侧边栏", self, triggered=self.toggle_sidebar_wrapper)
 
+        # --- Zoom Actions ---
+        self.zoom_in_action = QAction("放大", self, shortcut="Ctrl++", toolTip="放大视图 (Ctrl++)", triggered=self.zoom_in)
+        self.zoom_out_action = QAction("缩小", self, shortcut="Ctrl+-", toolTip="缩小视图 (Ctrl+-)", triggered=self.zoom_out)
+        self.reset_zoom_action = QAction("重置缩放", self, shortcut="Ctrl+0", toolTip="重置视图缩放 (Ctrl+0)", triggered=self.reset_zoom)
+
         self.about_action = QAction("关于", self, toolTip="显示关于信息", triggered=self.show_about_wrapper)
 
     # --- Menu/Toolbar Creation (Remains largely the same, uses created actions) ---
@@ -212,6 +224,10 @@ class MainWindow(QMainWindow):
 
         view_menu = menu_bar.addMenu("视图")
         view_menu.addAction(self.zen_action)
+        view_menu.addSeparator()
+        view_menu.addAction(self.zoom_in_action)
+        view_menu.addAction(self.zoom_out_action)
+        view_menu.addAction(self.reset_zoom_action)
         # Add toggle sidebar action if needed
         # view_menu.addAction(self.toggle_sidebar_action)
 
@@ -268,6 +284,10 @@ class MainWindow(QMainWindow):
         view_submenu.addAction(self.toggle_theme_action)
         view_submenu.addSeparator()
         view_submenu.addAction(self.zen_action)
+        view_submenu.addSeparator()
+        view_submenu.addAction(self.zoom_in_action)
+        view_submenu.addAction(self.zoom_out_action)
+        view_submenu.addAction(self.reset_zoom_action)
         
         help_submenu = more_menu.addMenu("帮助")
         help_submenu.addAction(self.about_action)
@@ -303,6 +323,43 @@ class MainWindow(QMainWindow):
     def toggle_zen_mode_wrapper(self, checked): self.view_operations.toggle_zen_mode(checked)
     # def toggle_sidebar_wrapper(self): self.view_operations.toggle_sidebar() # If action exists
     def show_about_wrapper(self): self.view_operations.show_about()
+
+    # --- Zoom Control Methods ---
+    def zoom_in(self):
+        """Increases the zoom factor and applies the theme."""
+        self.current_zoom_factor = min(self.max_zoom_factor, self.current_zoom_factor + self.zoom_step)
+        print(f"Zoom In: New factor = {self.current_zoom_factor:.2f}")
+        self.ui_manager.apply_current_theme()
+
+    def zoom_out(self):
+        """Decreases the zoom factor and applies the theme."""
+        self.current_zoom_factor = max(self.min_zoom_factor, self.current_zoom_factor - self.zoom_step)
+        print(f"Zoom Out: New factor = {self.current_zoom_factor:.2f}")
+        self.ui_manager.apply_current_theme()
+
+    def reset_zoom(self):
+        """Resets the zoom factor to default and applies the theme."""
+        self.current_zoom_factor = 1.0
+        print(f"Reset Zoom: New factor = {self.current_zoom_factor:.2f}")
+        self.ui_manager.apply_current_theme()
+
+    # --- Keyboard Event for Zoom Shortcuts ---
+    def keyPressEvent(self, event: QKeyEvent):
+        """Handles key press events for shortcuts like zoom."""
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_Plus or event.key() == Qt.Key.Key_Equal: # Ctrl + or Ctrl =
+                self.zoom_in()
+                event.accept()
+                return
+            elif event.key() == Qt.Key.Key_Minus: # Ctrl -
+                self.zoom_out()
+                event.accept()
+                return
+            elif event.key() == Qt.Key.Key_0: # Ctrl 0
+                self.reset_zoom()
+                event.accept()
+                return
+        super().keyPressEvent(event) # Call base class implementation for other keys
 
     # --- Translation Operations Wrappers ---
     def open_translation_dialog_wrapper(self):

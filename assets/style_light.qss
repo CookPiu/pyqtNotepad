@@ -29,11 +29,11 @@ QToolBar#ActivityBarToolBar
                          {
                              background:#F3F3F3;
                              border: none; /* Clear other borders */
-                             border-right: 1px solid #D0D0D0; /* Restored 1px border */
+                              border-right: 1px solid #D0D0D0; /* Restored 1px border */
                          }
 
 QToolBar[orientation="vertical"] QToolButton
-                         { width:48px; padding:12px 0; border:none; background:transparent; }
+                         { /* width:48px; */ padding:12px 0; border:none; background:transparent; /* font-size: 9pt; */ } /* Commented out fixed font size and width */
 QToolBar[orientation="vertical"] QToolButton:hover
                          { background:#E0E0E0; }
 QToolBar[orientation="vertical"] QToolButton:checked /* Style for selected/active tool */

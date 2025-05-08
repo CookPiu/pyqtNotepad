@@ -34,7 +34,7 @@ QToolBar#ActivityBarToolBar
                          }
 
 QToolBar[orientation="vertical"] QToolButton
-                         { width:48px; padding:12px 0; border:none; background:transparent; }
+                         { /* width:48px; */ padding:12px 0; border:none; background:transparent; } /* Commented out fixed width */
 QToolBar[orientation="vertical"] QToolButton:hover
                          { background:#444; }
 
