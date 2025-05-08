@@ -37,8 +37,9 @@ class OfficeViewerWidget(QWidget):
         # Basic PDF viewer settings (optional)
         self.web_view.settings().setAttribute(self.web_view.settings().WebAttribute.PluginsEnabled, True)
         self.web_view.settings().setAttribute(self.web_view.settings().WebAttribute.PdfViewerEnabled, True)
+        self.temp_html_content_path = None # For storing path to a temp HTML file if setHtml with base URL is problematic
 
-    def loadFile(self, office_file_path: str) -> bool:
+    def loadFile(self, office_file_path: str, preview_format: str = 'pdf') -> bool: # Added preview_format
         if not WIN32_AVAILABLE:
             QMessageBox.critical(self, "错误", "pywin32 模块未找到，无法执行 Office 文件转换。")
             return False
@@ -57,56 +58,83 @@ class OfficeViewerWidget(QWidget):
             # Initialize COM for this thread
             pythoncom.CoInitialize()
 
-            # Create a temporary file for the PDF
-            # Suffix is important for QWebEngineView to recognize it as PDF
-            # delete=False because Office will write to this path, we delete it manually in cleanup.
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmpfile:
-                self.temp_pdf_path = tmpfile.name
+            # Create a temporary file for the PDF (still needed as intermediate for HTML conversion)
+            # Suffix is important. delete=False because Office writes to it.
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmpfile_pdf:
+                self.temp_pdf_path = tmpfile_pdf.name
             
             abs_office_file_path = os.path.abspath(office_file_path)
 
+            # Step 1: Convert Office to PDF
             if file_extension == ".docx" or file_extension == ".doc":
                 app_dispatch_name = "Word.Application"
                 save_format_const = WD_FORMAT_PDF
                 office_app = win32com.client.Dispatch(app_dispatch_name)
-                office_app.Visible = False # Run in background
+                office_app.Visible = False
                 doc = office_app.Documents.Open(abs_office_file_path, ReadOnly=True)
                 doc.SaveAs(self.temp_pdf_path, FileFormat=save_format_const)
-
             elif file_extension == ".xlsx" or file_extension == ".xls":
                 app_dispatch_name = "Excel.Application"
-                save_format_const = XL_TYPE_PDF # This is Type for ExportAsFixedFormat
+                # save_format_const is not used for Excel's ExportAsFixedFormat's Type argument
                 office_app = win32com.client.Dispatch(app_dispatch_name)
-                office_app.Visible = False # Run in background
+                office_app.Visible = False
                 doc = office_app.Workbooks.Open(abs_office_file_path, ReadOnly=True)
-                doc.ExportAsFixedFormat(Type=save_format_const, Filename=self.temp_pdf_path)
-                
+                doc.ExportAsFixedFormat(Type=XL_TYPE_PDF, Filename=self.temp_pdf_path)
             elif file_extension == ".pptx" or file_extension == ".ppt":
                 app_dispatch_name = "PowerPoint.Application"
                 save_format_const = PPT_SAVE_AS_PDF
                 office_app = win32com.client.Dispatch(app_dispatch_name)
-                # PowerPoint might not have a simple Visible=False, or it might behave differently.
-                # office_app.Visible = False # May or may not work as expected
                 doc = office_app.Presentations.Open(abs_office_file_path, ReadOnly=True, WithWindow=False)
                 doc.SaveAs(self.temp_pdf_path, FileFormat=save_format_const)
-
             else:
-                QMessageBox.warning(self, "不支持的文件", f"不支持的文件类型: {file_extension} 进行PDF转换。")
-                self._cleanup_temp_file() # Clean up if temp file was created but not used
+                QMessageBox.warning(self, "不支持的文件", f"不支持的文件类型: {file_extension} 进行转换。")
+                self._cleanup_temp_files()
                 return False
 
-            self.web_view.setUrl(QUrl.fromLocalFile(self.temp_pdf_path))
+            # Step 2: Display based on preview_format
+            if preview_format == 'pdf':
+                self.web_view.setUrl(QUrl.fromLocalFile(self.temp_pdf_path))
+            elif preview_format == 'html':
+                # Import necessary functions from pdf_utils
+                from ...utils.pdf_utils import extract_pdf_content, APPLICATION_ROOT as PDF_UTILS_APP_ROOT
+                
+                html_content_string = extract_pdf_content(self.temp_pdf_path)
+                
+                # Option 1: Set HTML directly (preferred if truly self-contained)
+                # The APPLICATION_ROOT from pdf_utils might be different if pdf_utils is in a different
+                # relative location to the project root than this file.
+                # For simplicity, let's assume APPLICATION_ROOT from pdf_utils is suitable.
+                # A more robust way might be to pass the project root to setHtml.
+                # For now, using a generic local file base URL.
+                base_url = QUrl.fromLocalFile(os.path.dirname(abs_office_file_path)) # Base URL of original file's dir
+                self.web_view.setHtml(html_content_string, baseUrl=base_url)
+
+                # Option 2: Save HTML to a temp file and load that (if setHtml has issues with complex content/base URLs)
+                # with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode='w', encoding='utf-8') as tmpfile_html:
+                #     self.temp_html_content_path = tmpfile_html.name
+                #     tmpfile_html.write(html_content_string)
+                # self.web_view.setUrl(QUrl.fromLocalFile(self.temp_html_content_path))
+            else:
+                QMessageBox.warning(self, "未知预览格式", f"未知的预览格式: {preview_format}")
+                self._cleanup_temp_files()
+                return False
+            
             return True
 
         except pythoncom.com_error as e:
             QMessageBox.critical(self, "COM 错误", f"与 Microsoft Office 交互时发生错误 (COM Error):\n{str(e)}\n请确保已安装 Microsoft Office 并且文件未损坏。")
-            self._cleanup_temp_file()
+            self._cleanup_temp_files()
+            return False
+        except ImportError as e_imp: # Catch import error for pdf_utils if it occurs
+            QMessageBox.critical(self, "导入错误", f"无法加载必要的预览组件: {e_imp}")
+            self._cleanup_temp_files()
             return False
         except Exception as e:
-            QMessageBox.critical(self, "转换错误", f"将文件 '{os.path.basename(office_file_path)}' 转换为 PDF 时发生错误:\n{str(e)}")
-            self._cleanup_temp_file()
+            QMessageBox.critical(self, "转换/加载错误", f"处理文件 '{os.path.basename(office_file_path)}' 时发生错误:\n{str(e)}")
+            self._cleanup_temp_files()
             return False
         finally:
+            # Close Office doc and Quit app for Office to PDF conversion
             if doc:
                 try:
                     doc.Close(SaveChanges=0) # 0 for wdDoNotSaveChanges or equivalent
@@ -119,29 +147,36 @@ class OfficeViewerWidget(QWidget):
                     print(f"Error quitting Office application: {e_quit}")
             # Uninitialize COM
             pythoncom.CoUninitialize()
-            # Release COM objects (good practice, though Python's GC + comtypes usually handles it)
-            doc = None
+            # Release COM objects
+            doc = None # Ensure they are released
             office_app = None
 
 
-    def _cleanup_temp_file(self):
+    def _cleanup_temp_files(self): # Renamed to reflect it might clean more than one
         if self.temp_pdf_path and os.path.exists(self.temp_pdf_path):
             try:
                 os.remove(self.temp_pdf_path)
-                # print(f"Temporary PDF file deleted: {self.temp_pdf_path}") # For debugging
                 self.temp_pdf_path = None
             except OSError as e:
                 print(f"Error deleting temporary PDF file '{self.temp_pdf_path}': {e}")
-        elif self.temp_pdf_path: # Path exists but file doesn't, just clear path
+        elif self.temp_pdf_path: 
              self.temp_pdf_path = None
+
+        if self.temp_html_content_path and os.path.exists(self.temp_html_content_path):
+            try:
+                os.remove(self.temp_html_content_path)
+                self.temp_html_content_path = None
+            except OSError as e:
+                print(f"Error deleting temporary HTML file '{self.temp_html_content_path}': {e}")
+        elif self.temp_html_content_path:
+            self.temp_html_content_path = None
 
 
     def cleanup(self):
         """Called when the tab/widget is being closed."""
-        self.web_view.stop() # Stop any loading
-        self.web_view.setUrl(QUrl("")) # Clear the view
-        self._cleanup_temp_file()
-        # print("OfficeViewerWidget cleanup called.") # For debugging
+        self.web_view.stop() 
+        self.web_view.setUrl(QUrl("")) 
+        self._cleanup_temp_files() # Call the new cleanup method
 
     def closeEvent(self, event):
         """Handle widget close event."""

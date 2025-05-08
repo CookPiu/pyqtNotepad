@@ -120,29 +120,44 @@ class FileOperations:
             
             elif ext.lower() in ['.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt']: # Added legacy extensions
                 if sys.platform == 'win32':
-                    # Check if OfficeViewerWidget itself can be initialized (pywin32 check is inside it)
-                    # The OfficeViewerWidget now handles its own QWebEngineView for PDF display
+                    msg_box = QMessageBox(self.main_window)
+                    msg_box.setWindowTitle("选择预览类型")
+                    msg_box.setText(f"您希望如何预览 Office 文件 '{file_base_name}'？")
+                    pdf_button = msg_box.addButton("PDF 预览", QMessageBox.ButtonRole.YesRole)
+                    html_button = msg_box.addButton("HTML 预览", QMessageBox.ButtonRole.NoRole)
+                    cancel_button = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+                    msg_box.setDefaultButton(pdf_button) # Default to PDF preview
+                    
+                    clicked_button_idx = msg_box.exec() # exec() returns which button was clicked (0, 1, 2 for YesRole, NoRole, RejectRole if standard buttons)
+                                                        # For custom buttons, check against the button object.
+
+                    preview_format = None
+                    if msg_box.clickedButton() == pdf_button:
+                        preview_format = 'pdf'
+                    elif msg_box.clickedButton() == html_button:
+                        preview_format = 'html'
+                    else: # User cancelled or closed dialog
+                        return
+
                     try:
                         viewer_widget = OfficeViewerWidget(self.main_window)
-                        # loadFile now converts to PDF and loads it into its QWebEngineView
-                        if viewer_widget.loadFile(abs_file_path): 
-                            tab_name = os.path.basename(abs_file_path) + " (PDF预览)"
+                        # Pass the chosen preview_format to loadFile
+                        if viewer_widget.loadFile(abs_file_path, preview_format=preview_format): 
+                            tab_title_suffix = "(PDF预览)" if preview_format == 'pdf' else "(HTML预览)"
+                            tab_name = os.path.basename(abs_file_path) + f" {tab_title_suffix}"
                             index = self.main_window.tab_widget.addTab(viewer_widget, tab_name)
                             self.main_window.tab_widget.setCurrentIndex(index)
-                            # Store original office file path for reference, though viewer handles temp PDF
                             viewer_widget.setProperty("original_office_file_path", abs_file_path) 
-                            viewer_widget.setFocus() # Focus the new tab/widget
+                            viewer_widget.setFocus() 
                             if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
-                                self.main_window.statusBar.showMessage(f"已打开 Office 文件 (PDF预览): {file_path}")
+                                self.main_window.statusBar.showMessage(f"已打开 Office 文件 {tab_title_suffix}: {file_path}")
                         else:
-                            # loadFile in OfficeViewerWidget would have shown an error message.
-                            # Clean up the widget if load failed and it wasn't added.
-                            viewer_widget.deleteLater()
+                            viewer_widget.deleteLater() 
                     except Exception as e:
                         QMessageBox.critical(self.main_window, "Office 预览错误", f"预览 Office 文件 '{file_path}' 时发生意外错误:\n{str(e)}")
                 else:
                     QMessageBox.information(self.main_window, "功能限制", "Office 文件预览功能目前仅在 Windows 系统上通过本地 Office 转换实现。")
-                return # Processed Office file preview or showed message
+                return
 
             elif ext.lower() == '.html':
                 try:

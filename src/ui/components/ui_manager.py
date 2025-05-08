@@ -1,54 +1,76 @@
 import os
-from PyQt6.QtWidgets import QDockWidget, QMessageBox, QWidget, QTabWidget
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QColor # **Import QIcon and QColor**
+from PyQt6.QtWidgets import QDockWidget, QMessageBox, QWidget, QTabWidget, QApplication
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, pyqtSlot, QUrl
+from PyQt6.QtGui import QIcon, QColor
 
 # --- Corrected Relative Imports ---
 from ..composite.combined_tools import CombinedTools
 from ..atomic.mini_tools.calculator_widget import CalculatorWidget
-from ..atomic.mini_tools.timer_widget import TimerWidget # Added TimerWidget
+from ..atomic.mini_tools.timer_widget import TimerWidget
 from ..atomic.mini_tools.speech_recognition_widget import SpeechRecognitionWidget
 from ..views.note_downloader_view import NoteDownloaderView
-from ..views.pdf_viewer_view import PdfViewerView
+from ..views.pdf_viewer_view import PdfViewerView # This is the QWebEngineView based one
+from ..dialogs.pdf_action_dialog import PdfActionChoiceDialog # For PDF action choices
+from ...utils import pdf_utils # For extract_pdf_content
 # Import BaseWidget for type checking if needed
 from ..core.base_widget import BaseWidget
 # Import editor types for checking
 from ..atomic.editor.text_editor import TextEditor
 from ..atomic.editor.html_editor import HtmlEditor
-from ..atomic.markdown_editor_widget import MarkdownEditorWidget # Import MarkdownEditorWidget
-# Import ThemeManager if needed directly (though likely handled by MainWindow now)
+from ..atomic.markdown_editor_widget import MarkdownEditorWidget
+# Import ThemeManager if needed directly
 from ..core.theme_manager import ThemeManager
 
+# --- Worker for PDF to HTML conversion ---
+class PdfToHtmlWorkerForUIManager(QObject): # Worker is already a QObject
+    conversion_finished = pyqtSignal(str, str) # pdf_path, html_content
+    conversion_error = pyqtSignal(str, str)    # error_title, error_message
 
-class UIManager:
+    def __init__(self, pdf_path):
+        super().__init__()
+        self.pdf_path = pdf_path
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            html_content = pdf_utils.extract_pdf_content(self.pdf_path)
+            self.conversion_finished.emit(self.pdf_path, html_content)
+        except FileNotFoundError as e:
+            self.conversion_error.emit("文件错误", str(e))
+        except RuntimeError as e:
+            self.conversion_error.emit("HTML 转换失败", str(e))
+        except Exception as e:
+            self.conversion_error.emit("未知转换错误", f"转换过程中发生意外错误: {e}")
+
+class UIManager(QObject): # Inherit from QObject
     """处理MainWindow的UI管理功能，包括主题应用、视图/编辑器管理和工具窗口管理"""
     
     def __init__(self, main_window):
+        super().__init__(main_window) # Call QObject constructor, parent to main_window
         self.main_window = main_window
-        self.tab_widget = None # Explicitly initialize tab_widget
-        self.theme_manager = ThemeManager() # Create ThemeManager instance here
-        self.registered_views = {} # Initialize view registry
-        self.view_instances = {} # Initialize instance cache
-        self.view_docks = {} # Initialize dock cache
+        self.tab_widget = None 
+        self.theme_manager = ThemeManager() 
+        self.registered_views = {} 
+        self.view_instances = {} 
+        self.view_docks = {} 
         
-        # 注册核心视图和组件
+        self.pdf_conversion_thread = None 
+        self.pdf_conversion_worker = None 
+        
         self.register_speech_recognition()
-        self.register_view(NoteDownloaderView, "NoteDownloader") # 注册笔记下载器
+        self.register_view(NoteDownloaderView, "NoteDownloader") 
         self.register_view(CalculatorWidget, "计算器")
         self.register_view(TimerWidget, "计时器")
     
     def apply_current_theme(self):
         """应用当前主题和缩放级别到UI组件"""
-        # theme_manager is initialized in __init__
         base_style_sheet = self.theme_manager.get_current_style_sheet()
-        if not base_style_sheet: # Check if stylesheet loaded correctly
+        if not base_style_sheet: 
             print("警告: 未能加载基础样式表，无法应用主题。")
             return
 
-        # --- Zoom Logic ---
         effective_font_size = self.main_window.base_font_size_pt * self.main_window.current_zoom_factor
-        # Ensure font size is not excessively small
-        effective_font_size = max(1.0, effective_font_size) # Minimum 1pt
+        effective_font_size = max(1.0, effective_font_size)
         
         font_rules_str = (
             f"QWidget {{ font-size: {effective_font_size:.1f}pt; }}\n"
@@ -60,416 +82,265 @@ class UIManager:
             f"QTreeView::item {{ font-size: {effective_font_size:.1f}pt; }}\n"
             f"QListWidget {{ font-size: {effective_font_size:.1f}pt; }}\n"
             f"QListWidget::item {{ font-size: {effective_font_size:.1f}pt; }}\n"
-            f"QToolBar#ActivityBarToolBar QToolButton {{ font-size: {effective_font_size:.1f}pt; }}\n" # Highly specific rule for activity bar buttons
+            f"QToolBar#ActivityBarToolBar QToolButton {{ font-size: {effective_font_size:.1f}pt; }}\n"
         )
-        # Note: If style_light.qss contains "QToolBar[orientation=\"vertical\"] QToolButton { font-size: 9pt; }"
-        # that rule might override the global QWidget font-size for those specific buttons due to specificity.
-        # For true proportional scaling of those buttons, that specific rule in style_light.qss
-        # would ideally be removed or also dynamically adjusted.
-        # For now, we proceed with prepending the global font rule.
-
-        # --- Combine Styles ---
-        # Prepend font rule, then add base stylesheet, then dock widget style
         
-        # Append QDockWidget border style (as before)
         dock_widget_style = """
-            QDockWidget {
-                border: 1px solid #A9A9A9; /* DarkGray border for visibility */
-            }
-            QSplitter::handle { /* Ensure splitter handles are also visible */
-                background-color: #D3D3D3; /* LightGray */
-                border: 1px solid #A9A9A9; /* DarkGray */
-            }
-            QSplitter::handle:hover {
-                background-color: #BEBEBE; /* Slightly darker gray on hover */
-            }
-        """ # Corrected indentation for closing triple quotes
-        # It's generally better to add to existing styles rather than overwrite if possible,
-        # but QWidget.setStyleSheet usually replaces.
-        # If theme files are comprehensive, this might override some specific settings.
-        # For now, we append. If issues arise, one might need to parse and merge QSS.
-        # A simpler approach for now is to prepend, so specific styles in file can override.
+            QDockWidget { border: 1px solid #A9A9A9; }
+            QSplitter::handle { background-color: #D3D3D3; border: 1px solid #A9A9A9; }
+            QSplitter::handle:hover { background-color: #BEBEBE; }
+        """
         
-        # Prepend font rules to the base style sheet
         style_sheet_with_zoom = font_rules_str + base_style_sheet
-        
         final_style_sheet = style_sheet_with_zoom + dock_widget_style
         self.main_window.setStyleSheet(final_style_sheet)
-        # print(f"Applied Stylesheet with Zoom (Effective Font Size: {effective_font_size:.1f}pt):\n{final_style_sheet[:300]}...") # Debug: print start of stylesheet
 
-        # --- Programmatically set font for widgets not reliably styled by QSS font-size ---
         from PyQt6.QtGui import QFont
-        from PyQt6.QtWidgets import QToolButton, QTreeView # Ensure QToolButton is imported if not already
+        from PyQt6.QtWidgets import QToolButton, QTreeView
 
-        # File Explorer (QTreeView)
         if hasattr(self.main_window, 'file_explorer') and self.main_window.file_explorer:
             try:
                 current_tree_font = self.main_window.file_explorer.font()
                 current_tree_font.setPointSizeF(effective_font_size)
                 self.main_window.file_explorer.setFont(current_tree_font)
-                # print(f"Programmatically set font for FileExplorer to {effective_font_size:.1f}pt")
             except Exception as e:
                 print(f"Error setting font programmatically for FileExplorer: {e}")
 
-        # Activity Bar Buttons (QToolButtons in activity_bar_toolbar)
         if hasattr(self.main_window, 'activity_bar_toolbar') and self.main_window.activity_bar_toolbar:
             toolbar = self.main_window.activity_bar_toolbar
-
-            # Dynamically set the width of the activity bar toolbar
-            original_toolbar_width_design = 60 # Original fixed width from UIInitializer
+            original_toolbar_width_design = 60 
             width_scale_factor = 1.0
-            if self.main_window.base_font_size_pt > 0: # Avoid division by zero
+            if self.main_window.base_font_size_pt > 0:
                 width_scale_factor = effective_font_size / self.main_window.base_font_size_pt
-            
             scaled_toolbar_width = int(round(original_toolbar_width_design * width_scale_factor))
-            
-            min_toolbar_width = 40  # Minimum reasonable width
-            max_toolbar_width = 150 # Maximum reasonable width
+            min_toolbar_width, max_toolbar_width = 40, 150
             scaled_toolbar_width = max(min_toolbar_width, min(scaled_toolbar_width, max_toolbar_width))
-            
             toolbar.setFixedWidth(scaled_toolbar_width)
-            # print(f"  UIManager: ActivityBarToolBar width set to {scaled_toolbar_width}px (factor {width_scale_factor:.2f})")
-
-            print(f"UIManager: Processing ActivityBarToolBar (width: {scaled_toolbar_width}px). Target font size: {effective_font_size:.1f}pt")
             try:
-                # Try setting font on the toolbar itself first
                 current_toolbar_font = toolbar.font()
                 current_toolbar_font.setPointSizeF(effective_font_size)
                 toolbar.setFont(current_toolbar_font)
-                # print(f"  Programmatically set font for ActivityBarToolBar object to {effective_font_size:.1f}pt")
-
                 activity_buttons = toolbar.findChildren(QToolButton)
-                if not activity_buttons:
-                    print("  UIManager: No QToolButtons found in activity_bar_toolbar.")
-                else:
-                    print(f"  UIManager: Found {len(activity_buttons)} QToolButtons in activity_bar_toolbar. Setting font...")
-                
-                for button_idx, button in enumerate(activity_buttons):
-                    original_button_font_family = button.font().family()
-                    original_button_font_size = button.font().pointSizeF()
-                    print(f"    Button {button_idx} ('{button.text()}'): Original font: size {original_button_font_size:.1f}pt, family '{original_button_font_family}'")
-                    
-                    # Create a new QFont object instead of modifying a copy of the button's current font
-                    new_font = QFont(original_button_font_family) # Preserve original family
+                for button in activity_buttons:
+                    new_font = QFont(button.font().family()) 
                     new_font.setPointSizeF(effective_font_size)
-                    
                     button.setFont(new_font)
-                    
-                    font_after_set = button.font()
-                    print(f"    Button {button_idx} ('{button.text()}'): Target {effective_font_size:.1f}pt. Actual new font: size {font_after_set.pointSizeF():.1f}pt, family '{font_after_set.family()}'")
-
                     button.updateGeometry()
-                    # button.adjustSize() # This might be problematic if the toolbar width is strictly controlled
-
-                if activity_buttons:
-                    print(f"  Programmatically processed fonts for {len(activity_buttons)} Activity Bar buttons.")
             except Exception as e:
-                print(f"  Error setting font programmatically for Activity Bar buttons: {e}")
-        else:
-            print("UIManager: activity_bar_toolbar not found or is None.")
+                print(f"Error setting font programmatically for Activity Bar buttons: {e}")
 
-        # Status Bar
         if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
             status_bar = self.main_window.statusBar
             try:
                 current_msg = status_bar.currentMessage()
-                
                 current_statusbar_font = status_bar.font()
                 new_statusbar_font = QFont(current_statusbar_font)
                 new_statusbar_font.setPointSizeF(effective_font_size)
                 status_bar.setFont(new_statusbar_font)
-                
-                # Re-show the message to force re-render with the new font
-                # Or simply repaint if no message or if showMessage causes issues with temporary messages
-                if current_msg:
-                    status_bar.showMessage(current_msg) 
-                else:
-                    # If there was no message, ensure a repaint still happens
-                    status_bar.repaint()
-                
-                # Try to force layout update
+                if current_msg: status_bar.showMessage(current_msg) 
+                else: status_bar.repaint()
                 status_bar.adjustSize()
-                if status_bar.layout(): # Check if layout exists
-                    status_bar.layout().activate()
-
-                print(f"  UIManager: Programmatically set font for StatusBar to {effective_font_size:.1f}pt. Actual: {status_bar.font().pointSizeF():.1f}pt")
+                if status_bar.layout(): status_bar.layout().activate()
             except Exception as e:
-                print(f"  Error setting font programmatically for StatusBar: {e}")
-        else:
-            print("UIManager: statusBar not found or is None.")
+                print(f"Error setting font programmatically for StatusBar: {e}")
         
-        # Propagate theme update to all relevant children managed by UIManager
         is_dark = self.theme_manager.is_dark_theme()
-        # Update docks, tabs, etc.
         if hasattr(self.main_window, 'sidebar_dock') and hasattr(self.main_window.sidebar_dock.widget(), 'update_styles'):
             self.main_window.sidebar_dock.widget().update_styles(is_dark)
         
-        # Update open tabs/views
         if self.tab_widget:
             for i in range(self.tab_widget.count()):
-                widget_in_tab = self.tab_widget.widget(i) # This is the container widget (e.g., MarkdownEditorWidget, HtmlEditor, TextEditor)
+                widget_in_tab = self.tab_widget.widget(i)
+                editor_text_color = QColor("#D4D4D4") if is_dark else QColor("#000000")
+                editor_bg_color = QColor("#1E1E1E") if is_dark else QColor("#FFFFFF")
+                border_color = QColor("#333333") if is_dark else QColor("#D0D0D0")
+                current_line_bg = QColor("#3A3D41") if is_dark else QColor(Qt.GlobalColor.yellow).lighter(160)
+                preview_bg_color = QColor("#252526") if is_dark else QColor("#FFFFFF")
 
-                # Theme for MarkdownEditorWidget (source editor and preview)
                 if isinstance(widget_in_tab, MarkdownEditorWidget):
-                    preview_bg_color = QColor("#252526") if is_dark else QColor("#FFFFFF") 
                     widget_in_tab.set_preview_background_color(preview_bg_color)
-                    
-                    # Theme for its QPlainTextEdit and LineNumberArea
-                    editor_text_color = QColor("#D4D4D4") if is_dark else QColor("#000000")
-                    editor_bg_color = QColor("#1E1E1E") if is_dark else QColor("#FFFFFF")
-                    border_color = QColor("#333333") if is_dark else QColor("#D0D0D0")
-                    current_line_bg = QColor("#3A3D41") if is_dark else QColor(Qt.GlobalColor.yellow).lighter(160)
                     if hasattr(widget_in_tab, 'update_editor_theme_colors'):
                         widget_in_tab.update_editor_theme_colors(editor_text_color, editor_bg_color, border_color, current_line_bg)
-
-                # Theme for new HtmlEditor (source editor and preview)
-                elif isinstance(widget_in_tab, HtmlEditor): # New HtmlEditor (QWidget container)
-                    preview_bg_color = QColor("#252526") if is_dark else QColor("#FFFFFF")
-                    # The new HtmlEditor's preview is a QWebEngineView, set its background if needed (though it loads HTML)
-                    # For QWebEngineView, usually CSS in the HTML is better.
-                    # widget_in_tab.preview.page().setBackgroundColor(preview_bg_color) # Example
-                    
-                    # Theme for its QPlainTextEdit (source_editor) and LineNumberArea
-                    editor_text_color = QColor("#D4D4D4") if is_dark else QColor("#000000")
-                    editor_bg_color = QColor("#1E1E1E") if is_dark else QColor("#FFFFFF")
-                    border_color = QColor("#333333") if is_dark else QColor("#D0D0D0")
-                    current_line_bg = QColor("#3A3D41") if is_dark else QColor(Qt.GlobalColor.yellow).lighter(160)
+                elif isinstance(widget_in_tab, HtmlEditor):
                     if hasattr(widget_in_tab, 'update_editor_theme_colors'):
                          widget_in_tab.update_editor_theme_colors(editor_text_color, editor_bg_color, border_color, current_line_bg)
-                
-                # Theme for TextEditor
                 elif isinstance(widget_in_tab, TextEditor):
-                    if hasattr(widget_in_tab, 'update_colors'): # TextEditor has update_colors for its _InternalTextEdit
+                    if hasattr(widget_in_tab, 'update_colors'):
                         widget_in_tab.update_colors(is_dark)
-                
-                # General theme update for other BaseWidget descendants
                 elif hasattr(widget_in_tab, 'update_styles'): 
                     widget_in_tab.update_styles(is_dark)
 
-
-        current_theme = "暗色" if is_dark else "亮色"
+        current_theme_name = "暗色" if is_dark else "亮色"
         if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
-            self.main_window.statusBar.showMessage(f"已应用{current_theme}主题")
+            self.main_window.statusBar.showMessage(f"已应用{current_theme_name}主题")
 
     def toggle_theme(self):
-        """Toggles the theme and applies it."""
-        print("UIManager: Toggling theme...")
         self.theme_manager.toggle_theme()
         self.apply_current_theme()
-        # Emit signal from main_window if needed for external listeners
         if hasattr(self.main_window, 'theme_changed'):
              self.main_window.theme_changed.emit(self.theme_manager.is_dark_theme())
-        print(f"UIManager: Theme toggled to {'dark' if self.theme_manager.is_dark_theme() else 'light'}")
 
     def open_note_downloader_tab(self):
-        """打开笔记下载器标签页"""
-        # Use the new open_view method
-        self.open_view(view_name="NoteDownloader") # Assuming registered name is 'NoteDownloader'
+        self.open_view(view_name="NoteDownloader")
     
     def open_pdf_preview(self, pdf_path: str):
-        """打开PDF预览对话框，并连接其htmlGenerated信号"""
         try:
-            pdf_viewer = PdfViewerView(pdf_path, self.main_window)
-            # Connect the new signal to a handler in UIManager
-            pdf_viewer.htmlGenerated.connect(self._handle_pdf_html_generated)
-            pdf_viewer.exec()
-        except Exception as e:
-            QMessageBox.critical(self.main_window, "错误", f"无法打开 PDF 预览: {e}")
+            abs_pdf_path = os.path.abspath(pdf_path)
+            dialog = PdfActionChoiceDialog(abs_pdf_path, self.main_window)
+            choice = dialog.exec()
 
-    def _handle_pdf_html_generated(self, pdf_path: str, html_content: str):
-        """处理从PdfViewerView发送的HTML内容，在编辑器中打开"""
+            if choice == PdfActionChoiceDialog.PREVIEW_AS_PDF_IN_TAB:
+                pdf_viewer_tab_widget = PdfViewerView(self.main_window) 
+                if pdf_viewer_tab_widget.load_pdf(abs_pdf_path):
+                    tab_name = os.path.basename(abs_pdf_path)
+                    if not self.tab_widget:
+                        QMessageBox.critical(self.main_window, "错误", "标签页管理器未初始化。")
+                        pdf_viewer_tab_widget.deleteLater()
+                        return
+                    index = self.tab_widget.addTab(pdf_viewer_tab_widget, tab_name)
+                    self.tab_widget.setCurrentIndex(index)
+                    pdf_viewer_tab_widget.setProperty("file_path", abs_pdf_path) 
+                    pdf_viewer_tab_widget.setFocus()
+                    if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                        self.main_window.statusBar.showMessage(f"已打开 PDF 预览: {pdf_path}")
+                else:
+                    pdf_viewer_tab_widget.deleteLater()
+
+            elif choice == PdfActionChoiceDialog.CONVERT_TO_HTML_SOURCE:
+                self._start_pdf_to_html_conversion(abs_pdf_path)
+            
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "错误", f"处理 PDF 文件时出错: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _start_pdf_to_html_conversion(self, pdf_path: str):
+        if hasattr(self, 'pdf_conversion_thread') and self.pdf_conversion_thread and self.pdf_conversion_thread.isRunning():
+            self.pdf_conversion_thread.quit()
+            self.pdf_conversion_thread.wait(1000) 
+        
+        self.pdf_conversion_thread = QThread(self.main_window) 
+        self.pdf_conversion_worker = PdfToHtmlWorkerForUIManager(pdf_path)
+        self.pdf_conversion_worker.moveToThread(self.pdf_conversion_thread)
+
+        self.pdf_conversion_worker.conversion_finished.connect(self._on_pdf_to_html_conversion_finished)
+        self.pdf_conversion_worker.conversion_error.connect(self._on_pdf_to_html_conversion_error)
+        
+        self.pdf_conversion_thread.started.connect(self.pdf_conversion_worker.run)
+        self.pdf_conversion_thread.finished.connect(self.pdf_conversion_worker.deleteLater)
+        self.pdf_conversion_thread.finished.connect(self.pdf_conversion_thread.deleteLater)
+        self.pdf_conversion_thread.finished.connect(self._clear_conversion_refs)
+
+        if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+            self.main_window.statusBar.showMessage(f"正在转换 '{os.path.basename(pdf_path)}' 为 HTML...")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        self.pdf_conversion_thread.start()
+
+    @pyqtSlot(str, str)
+    def _on_pdf_to_html_conversion_finished(self, pdf_path: str, html_content: str):
+        QApplication.restoreOverrideCursor()
+        status_bar = getattr(self.main_window, 'statusBar', None)
+        if status_bar:
+            status_bar.showMessage(f"'{os.path.basename(pdf_path)}' 已成功转换为 HTML。", 5000)
+
         if not html_content:
             QMessageBox.warning(self.main_window, "警告", "从 PDF 提取的 HTML 内容为空。")
+            self._clear_conversion_refs()
             return
 
-        # Create a suitable name for the new tab
         base_name = os.path.basename(pdf_path)
         untitled_name = f"{os.path.splitext(base_name)[0]}.html (源码)"
 
-        # Use FileOperations to add a new HTML editor tab
-        # Ensure main_window has file_operations initialized
-        if hasattr(self.main_window, 'file_operations') and self.main_window.file_operations:
-            self.main_window.file_operations.add_editor_tab(
+        file_ops = getattr(self.main_window, 'file_operations', None)
+        if file_ops:
+            file_ops.add_editor_tab(
                 content=html_content,
-                file_path=None,  # It's unsaved initially
+                file_path=None, 
                 file_type='html',
                 set_current=True,
                 untitled_name=untitled_name
             )
-            # Set base URL if HtmlEditor supports it and it's relevant
-            new_editor = self.main_window.get_current_editor_widget() # This gets the HtmlEditor container
-            if isinstance(new_editor, HtmlEditor) and hasattr(new_editor, 'setHtml'):
-                 from PyQt6.QtCore import QUrl
-                 # For PyMuPDF generated HTML with embedded images, base URL might be less critical
-                 # but setting it to the original PDF's directory is a good practice if any relative links were hypothetically present.
-                 # However, since we are opening source, it might not be needed for rendering preview within HtmlEditor.
-                 # For now, let's set it based on where the PDF was, as HtmlEditor might use it for its internal preview.
-                 pdf_dir_path = os.path.dirname(pdf_path)
-                 if not pdf_dir_path.endswith(os.path.sep):
-                     pdf_dir_path += os.path.sep
-                 base_url_for_source = QUrl.fromLocalFile(pdf_dir_path)
-                 # HtmlEditor's setHtml is called by add_editor_tab. If we need to re-set with baseUrl:
-                 # new_editor.setHtml(html_content, baseUrl=base_url_for_source) 
-                 # add_editor_tab already calls setHtml. We might need to pass baseUrl to add_editor_tab or set it after.
-                 # For now, let's assume add_editor_tab handles content correctly.
-                 # The HtmlEditor itself has a default base URL.
-
-            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
-                self.main_window.statusBar.showMessage(f"PDF 已转换为 HTML 源代码: {untitled_name}")
         else:
-            QMessageBox.critical(self.main_window, "内部错误", "FileOperations 未初始化，无法打开HTML标签页。")
+            QMessageBox.critical(self.main_window, "内部错误", "FileOperations 未初始化。")
+        
+        self._clear_conversion_refs()
+
+    @pyqtSlot(str, str)
+    def _on_pdf_to_html_conversion_error(self, title: str, error_message: str):
+        QApplication.restoreOverrideCursor()
+        status_bar = getattr(self.main_window, 'statusBar', None)
+        if status_bar:
+            status_bar.showMessage(f"HTML 转换失败: {title}", 5000)
+        QMessageBox.critical(self.main_window, title, error_message)
+        self._clear_conversion_refs()
+
+    def _clear_conversion_refs(self):
+        self.pdf_conversion_worker = None
+        self.pdf_conversion_thread = None
+    
+    # _handle_pdf_html_generated is effectively replaced by the threaded conversion logic above.
+    # If it was connected to any signals, those connections should be reviewed.
+    # For now, commenting out its old content.
+    def _handle_pdf_html_generated(self, pdf_path: str, html_content: str):
+        """
+        DEPRECATED: This method's functionality is now handled by 
+        _start_pdf_to_html_conversion and its connected slots.
+        """
+        # print("DEPRECATED: _handle_pdf_html_generated called. This logic should be reviewed.")
+        # If this is still called, it means an old signal connection might exist.
+        # The new PdfViewerView (QWebEngineView based) does not emit htmlGenerated.
+        # The PdfActionChoiceDialog triggers the new threaded conversion.
+        pass
     
     def sidebar_item_clicked(self, item):
-        """处理侧边栏项目点击事件"""
         item_text = item.text()
-        is_combined_tool = item_text in ("计时器", "便签与待办", "日历")
-        combined_dock_key = "CombinedTools"
-        # 确定要查找或存储的dock的key
-        dock_key = combined_dock_key if is_combined_tool else item_text
-
-        # TODO: Refactor sidebar item handling.
-        # This logic should likely use UIManager.open_view to open registered views
-        # in appropriate locations (docks or tabs) instead of manually creating docks here.
-        # For now, just map names to potential view names.
         view_map = {
-            "计时器": "Timer",
-            "便签与待办": "CombinedNotes", # Or StickyNotes/TodoList individually?
-            "计算器": "Calculator",
-            "日历": "Calendar",
-            "笔记下载": "NoteDownloader",
-            "语音识别": "SpeechRecognition",
+            "计时器": "Timer", "便签与待办": "CombinedNotes", 
+            "计算器": "Calculator", "日历": "Calendar",
+            "笔记下载": "NoteDownloader", "语音识别": "SpeechRecognition",
         }
         view_name_to_open = view_map.get(item_text)
 
         if view_name_to_open:
-             print(f"Sidebar clicked: {item_text} -> Opening view: {view_name_to_open}")
-             self.open_view(view_name=view_name_to_open, open_in_dock=True) # Try opening in a dock
-             # Update status bar if open_view doesn't handle it
+             self.open_view(view_name=view_name_to_open, open_in_dock=True)
              if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
                   self.main_window.statusBar.showMessage(f"已打开/切换到 {item_text}")
         else:
              QMessageBox.information(self.main_window, "功能占位符", f"'{item_text}' 功能尚未实现或注册。")
 
-    # Wrapper for signal connection from PdfViewerView
-    def convert_pdf_to_html_wrapper(self, pdf_path: str):
-         self.convert_pdf_to_html(pdf_path)
+    def convert_pdf_to_html_wrapper(self, pdf_path: str): # This might be called from a menu?
+         self._start_pdf_to_html_conversion(pdf_path) # Use the threaded version
     
-    def convert_pdf_to_html(self, pdf_path: str):
-        """将PDF转换为HTML并在新的HTML编辑器标签页中打开 (This method might be redundant now or needs to be re-evaluated)"""
-        # This method was originally for a direct "Convert PDF to HTML and open in editor" action,
-        # distinct from the PDF Previewer dialog.
-        # With PdfViewerView now emitting htmlGenerated, this UIManager.convert_pdf_to_html
-        # might be invoked by a different UI action (e.g., a menu item).
-        # Its logic is very similar to _handle_pdf_html_generated.
-        # For now, ensure it uses the updated pdf_utils.extract_pdf_content signature.
-
-        try:
-            from ...utils.pdf_utils import extract_pdf_content # pdf_utils.py updated to not take parent_window
-        except ImportError:
-            QMessageBox.critical(self.main_window, "错误", "无法导入 PDF 处理工具 (pdf_utils)。")
-            return
-
-        try:
-            html_content = extract_pdf_content(pdf_path) # No parent_window argument
-            if not html_content:
-                QMessageBox.warning(self.main_window, "警告", "无法从 PDF 提取内容。")
-                return
-
-            # Create and open a new HTML editor tab using FileOperations
-            # Pass content directly instead of creating editor here
-            file_name = os.path.basename(pdf_path) + ".html"
-            self.main_window.file_operations.add_editor_tab(
-                content=html_content,
-                file_path=None, # It's unsaved initially
-                file_type='html',
-                set_current=True,
-                untitled_name=f"{os.path.splitext(file_name)[0]} (转换)"
-            )
-
-            # Get the newly created editor to set properties
-            new_editor = self.main_window.get_current_editor_widget()
-            if self.is_widget_html_editor(new_editor) and hasattr(new_editor, 'setHtml'):
-                 # The content is already set by add_editor_tab, but likely with the wrong base URL.
-                 # We need to set it again with the correct base URL for relative paths (like images).
-                 from PyQt6.QtCore import QUrl # Ensure QUrl is imported
-                 
-                 # Construct the base URL from the original PDF's directory
-                 # Ensure the path ends with a separator for QUrl.fromLocalFile to treat it as a directory.
-                 pdf_dir_path = os.path.dirname(pdf_path)
-                 if not pdf_dir_path.endswith(os.path.sep):
-                     pdf_dir_path += os.path.sep
-                 base_url_for_pdf = QUrl.fromLocalFile(pdf_dir_path)
-                 
-                 # print(f"UIManager: Setting HTML for PDF conversion with baseUrl: {base_url_for_pdf.toString()}") # Debug
-                 # It's assumed html_content variable still holds the correct HTML string here.
-                 new_editor.setHtml(html_content, baseUrl=base_url_for_pdf)
-                 
-                 # Store temporary directory path if needed for cleanup later
-                 # new_editor.setProperty("pdf_temp_dir", temp_dir) # temp_dir is no longer returned
-                 new_editor.setProperty("is_pdf_converted", True)
-                 # Ensure it starts as unmodified (setHtml in HtmlEditor already does this)
-                 # new_editor.setModified(False) # Already handled by HtmlEditor.setHtml
-
-            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
-                 self.main_window.statusBar.showMessage(f"已将 PDF 转换为 HTML: {file_name}")
-
-        except Exception as e:
-            QMessageBox.critical(self.main_window, "转换错误", f"转换 PDF 时出错: {e}")
-            import traceback
-            traceback.print_exc()
-
-    # --- New Methods for View Management ---
+    def convert_pdf_to_html(self, pdf_path: str): # Direct call, also use threaded version
+        self._start_pdf_to_html_conversion(pdf_path)
 
     def create_tab_widget(self):
-         """Creates the central tab widget."""
-         print("UIManager: Attempting to create QTabWidget (simplified)...") # Debug print
          try:
-             # Create without parent first, assign later if needed by layout
              new_tab_widget = QTabWidget()
              if new_tab_widget:
-                 print("UIManager: QTabWidget instance created successfully.") # Debug print
-                 self.tab_widget = new_tab_widget # Assign to the instance variable
-                 # Set properties after successful creation
+                 self.tab_widget = new_tab_widget
                  self.tab_widget.setDocumentMode(True)
                  self.tab_widget.setTabsClosable(True)
                  self.tab_widget.setMovable(True)
-                 # Connect signal - ensure file_operations exists
                  if hasattr(self.main_window, 'file_operations'):
                       self.tab_widget.tabCloseRequested.connect(self.main_window.file_operations.close_tab)
-                 else:
-                      print("UIManager: WARNING - main_window.file_operations not found for tabCloseRequested connection.")
-                 # Store reference in MainWindow
                  self.main_window.tab_widget = self.tab_widget
-                 print(f"UIManager: tab_widget assigned to self.tab_widget: {self.tab_widget is not None}") # Debug print
              else:
-                 # This case should ideally not happen if the constructor doesn't raise an exception
-                 print("UIManager: ERROR - QTabWidget creation returned None/False!") # Debug print
-                 self.tab_widget = None # Ensure it's None if creation failed
+                 self.tab_widget = None 
                  self.main_window.tab_widget = None
          except Exception as e:
-             print(f"UIManager: EXCEPTION during QTabWidget creation: {e}") # Catch potential exceptions
-             import traceback
-             traceback.print_exc()
-             self.tab_widget = None # Ensure it's None if creation failed
+             print(f"UIManager: EXCEPTION during QTabWidget creation: {e}")
+             self.tab_widget = None
              self.main_window.tab_widget = None
 
     def register_view(self, view_class: type[BaseWidget], view_name: str, icon_name: str | None = None):
-         """Registers a view class for later instantiation."""
-         # Dictionaries are initialized in __init__ now
          if view_name in self.registered_views:
              print(f"警告: 视图 '{view_name}' 已注册。将被覆盖。")
-
-         self.registered_views[view_name] = {
-             "class": view_class,
-             "icon": icon_name
-         }
+         self.registered_views[view_name] = {"class": view_class, "icon": icon_name}
          print(f"视图已注册: {view_name} (Class: {view_class.__name__})")
-         # Add button to activity bar dynamically? Or assume fixed buttons map to names.
-         # For now, assume fixed buttons or menu items trigger open_view(view_name)
 
     def open_view(self, view_name: str, open_in_dock: bool = False, bring_to_front: bool = True):
-        """Opens or focuses a registered view, either in a tab or a dock."""
-        if not hasattr(self, 'registered_views') or view_name not in self.registered_views:
+        if view_name not in self.registered_views:
             QMessageBox.warning(self.main_window, "视图未注册", f"视图 '{view_name}' 未找到或未注册。")
             return
 
@@ -477,133 +348,85 @@ class UIManager:
         view_class = view_info["class"]
         icon = QIcon.fromTheme(view_info["icon"]) if view_info["icon"] else QIcon()
 
-        # --- Handle Docked Views ---
         if open_in_dock:
             dock = self.view_docks.get(view_name)
-            if dock and dock.widget(): # Check if dock and widget exist
-                 if bring_to_front:
-                      dock.show()
-                      dock.raise_()
-                 return dock.widget() # Return existing instance
-            elif dock and not dock.widget(): # Dock exists but widget was deleted?
-                 print(f"警告: 视图 '{view_name}' 的 Dock 存在但无 Widget，将重新创建。")
-                 del self.view_docks[view_name] # Remove bad dock reference
-
-            # Create new dock and instance
+            if dock and dock.widget():
+                 if bring_to_front: dock.show(); dock.raise_()
+                 return dock.widget()
+            elif dock and not dock.widget():
+                 del self.view_docks[view_name] 
             try:
                  instance = view_class(self.main_window)
                  dock = QDockWidget(view_name, self.main_window)
                  dock.setObjectName(f"{view_name}Dock")
                  dock.setWidget(instance)
-                 # Allow docking anywhere
                  dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-                 # Decide initial dock area (e.g., Right)
                  self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-                 self.view_docks[view_name] = dock # Store dock reference
-                 self.view_instances[view_name] = instance # Store instance reference
-
-                 # Attempt to tabify with existing docks in the same area
+                 self.view_docks[view_name] = dock
+                 self.view_instances[view_name] = instance
                  for existing_dock in self.view_docks.values():
                       if existing_dock != dock and self.main_window.dockWidgetArea(existing_dock) == self.main_window.dockWidgetArea(dock):
                            self.main_window.tabifyDockWidget(existing_dock, dock)
-                           break # Tabify with the first one found
-
-                 if bring_to_front:
-                      dock.show()
-                      dock.raise_()
+                           break
+                 if bring_to_front: dock.show(); dock.raise_()
                  return instance
             except Exception as e:
                  QMessageBox.critical(self.main_window, "打开视图错误", f"创建视图 '{view_name}' 时出错: {e}")
                  return None
-
-        # --- Handle Tabbed Views (Default) ---
-        else:
-            # Check if already open in a tab
+        else: # Tabbed view
             for i in range(self.tab_widget.count()):
                  widget = self.tab_widget.widget(i)
                  if isinstance(widget, view_class):
-                      if bring_to_front:
-                           self.tab_widget.setCurrentIndex(i)
-                      return widget # Return existing instance
-
-            # Create new instance and add tab
+                      if bring_to_front: self.tab_widget.setCurrentIndex(i)
+                      return widget
             try:
                  instance = view_class(self.main_window)
                  index = self.tab_widget.addTab(instance, icon, view_name)
-                 if bring_to_front:
-                      self.tab_widget.setCurrentIndex(index)
-                 # Store instance if needed for single-instance views
-                 # self.view_instances[view_name] = instance
+                 if bring_to_front: self.tab_widget.setCurrentIndex(index)
                  return instance
             except Exception as e:
                  QMessageBox.critical(self.main_window, "打开视图错误", f"创建视图 '{view_name}' 时出错: {e}")
                  return None
 
-    # --- Utility Methods ---
     def is_widget_editor(self, widget: QWidget | None) -> bool:
-        """
-        Checks if a widget is one ofthe known actual editor components 
-        (e.g., _InternalTextEdit from TextEditor, or QPlainTextEdit from MarkdownEditorWidget/HtmlEditor).
-        This method is called with the actual editor component (not the container).
-        """
-        if widget is None:
-            return False
-        
-        from PyQt6.QtWidgets import QPlainTextEdit # For QPlainTextEdit used in MD and HTML editors
-        from ..atomic.editor.text_editor import _InternalTextEdit # For TextEditor's internal part
-        
-        # The old HtmlEditor (QWebEngineView) is no longer the direct editor.
-        # The new HtmlEditor's source_editor is QPlainTextEdit.
+        if widget is None: return False
+        from PyQt6.QtWidgets import QPlainTextEdit 
+        from ..atomic.editor.text_editor import _InternalTextEdit
         return isinstance(widget, (_InternalTextEdit, QPlainTextEdit))
 
-    def is_widget_html_editor(self, widget: QWidget | None) -> bool: # This widget is the container from the tab
-         """Checks specifically if a widget is an HtmlEditor."""
-         if widget is None:
-             return False
+    def is_widget_html_editor(self, widget: QWidget | None) -> bool:
+         if widget is None: return False
          return isinstance(widget, HtmlEditor)
 
     def get_widget_base_name(self, widget: QWidget | None) -> str | None:
-         """Gets the base name (filename or untitled name) for a widget."""
          if not widget: return None
-         # Check for file_path property first
          file_path = widget.property("file_path")
-         if file_path:
-             return os.path.basename(file_path)
-         # Check for untitled_name property
+         if file_path: return os.path.basename(file_path)
          untitled_name = widget.property("untitled_name")
-         if untitled_name:
-             return untitled_name
-         # Fallback for non-editor views or if properties aren't set
-         if hasattr(widget, 'windowTitle') and callable(widget.windowTitle):
-              return widget.windowTitle() # Use window title if available
-         # Last resort: Use class name
+         if untitled_name: return untitled_name
+         if hasattr(widget, 'windowTitle') and callable(widget.windowTitle): return widget.windowTitle()
          return widget.__class__.__name__
 
     def is_file_open(self, file_path: str) -> bool:
-        """Checks if a file is already open in a tab."""
-        if not self.tab_widget:
-            return False
+        if not self.tab_widget: return False
         abs_file_path = os.path.abspath(file_path)
         for i in range(self.tab_widget.count()):
             widget = self.tab_widget.widget(i)
-            if self.is_widget_editor(widget):
-                editor_path = widget.property("file_path")
-                if editor_path and os.path.abspath(editor_path) == abs_file_path:
-                    return True
+            # This check needs to be more robust if tabs can contain non-editor widgets with file_path
+            editor_path = widget.property("file_path") # Assuming only editor tabs have 'file_path'
+            if editor_path and os.path.abspath(editor_path) == abs_file_path:
+                return True
         return False
 
     def focus_tab_by_filepath(self, file_path: str):
-        """Sets the current tab to the one containing the specified file."""
-        if not self.tab_widget:
-            return
+        if not self.tab_widget: return
         abs_file_path = os.path.abspath(file_path)
         for i in range(self.tab_widget.count()):
             widget = self.tab_widget.widget(i)
-            if self.is_widget_editor(widget):
-                editor_path = widget.property("file_path")
-                if editor_path and os.path.abspath(editor_path) == abs_file_path:
-                    self.tab_widget.setCurrentIndex(i)
-                    break
+            editor_path = widget.property("file_path")
+            if editor_path and os.path.abspath(editor_path) == abs_file_path:
+                self.tab_widget.setCurrentIndex(i)
+                break
                     
     def register_speech_recognition(self):
         """注册语音识别组件"""
