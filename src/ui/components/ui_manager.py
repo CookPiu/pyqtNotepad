@@ -405,51 +405,137 @@ class UIManager(QObject): # Inherit from QObject
                 QMessageBox.critical(self.main_window, "打开工具错误", f"在工具箱中创建视图 '{view_name}' 时出错: {e}")
                 return None
 
-        elif open_in_dock: # Existing dock logic
+        elif open_in_dock:
             dock = self.view_docks.get(view_name)
-            # If an instance exists but not in a dock, or if the dock's widget is different, recreate dock
-            if instance and (not dock or dock.widget() != instance):
+            instance_to_use = instance # Could be None initially
+
+            # Special handling for NoteDownloader: use its pre-created content widget
+            if view_name == "NoteDownloader":
+                if hasattr(self.main_window, 'note_downloader_view_content') and self.main_window.note_downloader_view_content:
+                    instance_to_use = self.main_window.note_downloader_view_content
+                    # Ensure it's in view_instances if not already
+                    if view_name not in self.view_instances or self.view_instances[view_name] != instance_to_use:
+                        self.view_instances[view_name] = instance_to_use
+                else:
+                    QMessageBox.critical(self.main_window, "错误", "NoteDownloader 内容视图未初始化。")
+                    return None
+            
+            # If an instance exists (either pre-existing or NoteDownloader's content)
+            # but it's not in a dock, or the dock's widget is different, recreate the dock.
+            if instance_to_use and (not dock or dock.widget() != instance_to_use):
                 if dock: # Remove old dock if its widget is wrong or gone
+                    # Check if the widget is the PanelWidget for NoteDownloader, if so, special care
+                    if view_name == "NoteDownloader" and dock.widget() == self.main_window.note_downloader_panel:
+                        # The panel itself is not the instance we want in the dock, its content is.
+                        # So, just detach and delete the dock.
+                        pass # No need to delete the panel, just the dock.
+                    
+                    current_widget_in_dock = dock.widget()
                     dock.setWidget(None) # Detach widget
+                    if current_widget_in_dock and current_widget_in_dock != self.main_window.note_downloader_view_content:
+                        # Only delete if it's not the persistent NoteDownloader content
+                        # current_widget_in_dock.deleteLater() # Be careful with deleting shared instances
+                        pass
+
                     dock.deleteLater()
-                    del self.view_docks[view_name]
+                    if view_name in self.view_docks: # Ensure key exists before deleting
+                        del self.view_docks[view_name]
                 dock = None # Force dock recreation
 
-            if dock and dock.widget() == instance and instance is not None:
-                 if bring_to_front: dock.show(); dock.raise_()
-                 return instance
-            # If dock is None but instance exists, or if dock's widget is None (already detached)
-            # Proceed to create/re-create the dock for the existing/new instance.
-
+            if dock and dock.widget() == instance_to_use and instance_to_use is not None:
+                if bring_to_front:
+                    dock.show()
+                    dock.raise_()
+                return dock # Return the dock itself, or instance_to_use? Let's return dock.
+            
             try:
-                 if instance is None: # Create instance if it truly doesn't exist
-                    instance = view_class(self.main_window)
-                    self.view_instances[view_name] = instance
+                if instance_to_use is None: # Create instance if it truly doesn't exist (and not NoteDownloader)
+                    instance_to_use = view_class(self.main_window)
+                    self.view_instances[view_name] = instance_to_use
 
-                 dock = QDockWidget(view_name, self.main_window)
-                 dock.setObjectName(f"{view_name}Dock")
-                 dock.setWidget(instance)
-                 dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-                 self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock) # Default to right
-                 self.view_docks[view_name] = dock
-                 
-                 # Attempt to tabify with other docks in the same area
-                 for existing_dock_name, existing_dock_obj in self.view_docks.items():
-                      if existing_dock_obj != dock and self.main_window.dockWidgetArea(existing_dock_obj) == self.main_window.dockWidgetArea(dock):
-                           self.main_window.tabifyDockWidget(existing_dock_obj, dock)
-                           break # Tabify with the first one found in the area
-                 
-                 if bring_to_front: dock.show(); dock.raise_()
-                 return instance
+                dock = QDockWidget(view_name, self.main_window)
+                dock.setObjectName(f"{view_name}Dock")
+                dock.setWidget(instance_to_use) # Use instance_to_use (which could be NoteDownloader's content)
+                dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+                # Make docks float by default, user can dock them. Or set a default area.
+                # dock.setFloating(True) 
+                self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock) # Default to right
+                self.view_docks[view_name] = dock
+                
+                # Connect visibilityChanged to update activity bar button state
+                dock.visibilityChanged.connect(
+                    lambda visible, vn=view_name: self._handle_dock_visibility_change(vn, visible)
+                )
+
+                # Attempt to tabify with other docks in the same area
+                for existing_dock_name, existing_dock_obj in self.view_docks.items():
+                    if existing_dock_obj != dock and self.main_window.dockWidgetArea(existing_dock_obj) == self.main_window.dockWidgetArea(dock):
+                        self.main_window.tabifyDockWidget(existing_dock_obj, dock)
+                        break 
+                
+                if bring_to_front:
+                    dock.show()
+                    dock.raise_()
+                
+                if view_name == "NoteDownloader":
+                    # Attempt to set initial width for NoteDownloader dock
+                    # This might need to be adjusted or done via QMainWindow's splitter if applicable
+                    try:
+                        # Calculate desired width (e.g., 1/3 of main window width)
+                        # Ensure main_window has a valid width property
+                        if hasattr(self.main_window, 'width') and callable(self.main_window.width):
+                            main_window_width = self.main_window.width()
+                            if main_window_width > 0:
+                                desired_width = int(main_window_width * 0.45) # Target 45% of main window width
+                                
+                                # Set minimum width for the content widget of the dock
+                                if instance_to_use and hasattr(instance_to_use, 'setMinimumWidth'):
+                                    instance_to_use.setMinimumWidth(desired_width)
+                                    print(f"NoteDownloader content widget minimum width set to {desired_width}px.")
+
+                                # Still attempt to resize the dock itself as a hint to QMainWindow
+                                self.main_window.resizeDocks([dock], [desired_width], Qt.Orientation.Horizontal)
+                                print(f"NoteDownloader dock '{view_name}' resize attempted to {desired_width}px width (45% of main window).")
+                            else:
+                                print(f"NoteDownloader dock '{view_name}' not resized: main_window width is not positive.")
+                        else:
+                             print(f"NoteDownloader dock '{view_name}' not resized: main_window has no width method or it's not callable.")
+                    except Exception as e_resize:
+                        print(f"Error trying to resize NoteDownloader dock '{view_name}': {e_resize}")
+                        
+                return dock # Return the dock
             except Exception as e:
-                 QMessageBox.critical(self.main_window, "打开视图错误", f"创建停靠视图 '{view_name}' 时出错: {e}")
-                 return None
-        else: # Fallback to main editor tab area (though tools shouldn't typically open here)
-            # This part is less relevant now with RootEditorAreaWidget handling editor tabs.
-            # Tools should go to toolbox or docks.
-            # If a view is meant for the main editor area, FileOperations should handle it.
+                QMessageBox.critical(self.main_window, "打开视图错误", f"创建停靠视图 '{view_name}' 时出错: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
+        else: 
             QMessageBox.information(self.main_window, "提示", f"视图 '{view_name}' 通常在工具箱或作为可停靠窗口打开。")
             return None
+
+    def _handle_dock_visibility_change(self, view_name: str, visible: bool):
+        """Updates the activity bar button when a dock's visibility changes."""
+        if not visible: # If dock becomes hidden (e.g., closed by user via 'X')
+            if hasattr(self.main_window, 'activity_view_buttons'):
+                button = self.main_window.activity_view_buttons.get(view_name)
+                if button and button.isChecked():
+                    button.setChecked(False) # Uncheck the corresponding activity bar button
+
+    def close_dock_view(self, view_name: str):
+        """Closes (hides) a dock view."""
+        dock = self.view_docks.get(view_name)
+        if dock:
+            dock.hide() # Hide the dock. This will trigger visibilityChanged.
+            # If you want to fully close and remove:
+            # dock.close() 
+            # if dock.widget() and view_name != "NoteDownloader": # Don't delete NoteDownloader's shared content
+            #     dock.widget().deleteLater() # Delete the instance inside the dock
+            # dock.deleteLater()
+            # if view_name in self.view_docks: del self.view_docks[view_name]
+            # if view_name in self.view_instances and view_name != "NoteDownloader":
+            #     del self.view_instances[view_name]
+        
+        # The visibilityChanged signal from the dock should handle unchecking the button.
 
     def close_view_in_tool_box(self, view_name: str):
         """Closes a view tab in the bottom toolbox."""

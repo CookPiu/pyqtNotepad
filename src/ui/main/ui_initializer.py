@@ -201,38 +201,41 @@ class UIInitializer:
         main_content_splitter.addWidget(self.main_window.file_explorer)
         main_content_splitter.addWidget(self.main_window.root_editor_area) # RootEditorAreaWidget directly here
         
-        main_content_splitter.setStretchFactor(0, 0) # File explorer less stretch
-        main_content_splitter.setStretchFactor(1, 1) # Editor area takes more space
-        main_content_splitter.setSizes([200, 800]) # Adjust initial sizes
+        # Adjust stretch factors for file explorer and editor area
+        # Target: File Explorer ~15%, Editor ~40% of total, if NoteDownloader is ~45%
+        # So, within their combined 55%, File Explorer is 15/55, Editor is 40/55
+        # Simplified ratio for stretch factors: FE:Editor = 15:40 = 3:8
+        main_content_splitter.setStretchFactor(0, 3) 
+        main_content_splitter.setStretchFactor(1, 8) 
         
-        # Create the bottom toolbox tab widget
-        self.main_window.tool_box_widget = QTabWidget()
-        self.main_window.tool_box_widget.setObjectName("BottomToolboxWidget")
-        self.main_window.tool_box_widget.setMinimumHeight(150) # Initial height for toolbox
-        self.main_window.tool_box_widget.setMaximumHeight(400) # Max height for toolbox
-        # self.main_window.tool_box_widget.hide() # Initially hidden, shown when a tool is opened
-
-        # Main vertical splitter: Top (main_content_splitter) / Bottom (tool_box_widget)
-        app_level_splitter = QSplitter(Qt.Orientation.Vertical)
-        app_level_splitter.setObjectName("AppLevelSplitter")
-        app_level_splitter.setHandleWidth(2)
-        app_level_splitter.setChildrenCollapsible(False)
-
-        app_level_splitter.addWidget(main_content_splitter)
-        app_level_splitter.addWidget(self.main_window.tool_box_widget)
+        # Set initial sizes based on a typical window width, maintaining the 3:8 ratio
+        # This helps establish a reasonable starting point before user resizes.
+        # Example: if main_content_splitter is expected to be ~550px (if total is 1000px)
+        # Then FE = (3/11)*550 = 150px, Editor = (8/11)*550 = 400px
+        # We can set these as initial pixel values.
+        # However, QMainWindow's initial size might not be stable yet.
+        # Let's try with a common initial width for the splitter itself.
+        # If the main window is ~1100px wide, and NoteDownloader takes ~45% (495px),
+        # then main_content_splitter gets ~605px.
+        # FE = (3/11)*605 = ~165px
+        # Editor = (8/11)*605 = ~440px
+        main_content_splitter.setSizes([165, 440]) # Adjust initial sizes
         
-        app_level_splitter.setStretchFactor(0, 1) # Main content area takes more space
-        app_level_splitter.setStretchFactor(1, 0) # Toolbox less initial stretch
-        app_level_splitter.setSizes([600, 150]) # Initial sizes
+        # The bottom toolbox tab widget is no longer needed.
+        # self.main_window.tool_box_widget = QTabWidget()
+        # ... (相关的tool_box_widget代码已删除)
 
-        parent_layout.addWidget(app_level_splitter)
+        # The app_level_splitter is no longer needed as there's no bottom toolbox.
+        # main_content_splitter will be added directly to the parent_layout.
+        parent_layout.addWidget(main_content_splitter)
 
-        # NoteDownloaderPanel is no longer part of the initial main layout.
-        # It will be added to the tool_box_widget when its activity bar button is clicked.
-        # The self.main_window.note_downloader_panel instance is created in _create_core_views
-        # and can be reused by the handle_activity_button_click logic.
+        # NoteDownloaderPanel and its content (note_downloader_view_content) are created in _create_core_views.
+        # UIManager will use note_downloader_view_content directly when opening NoteDownloader as a dock.
+        # The self.main_window.note_downloader_panel (PanelWidget wrapper) is likely no longer needed
+        # unless it provides functionality beyond what QDockWidget offers for this view.
+        # For now, we assume QDockWidget is sufficient.
 
-        print("UIInitializer: Setup main layout with RootEditorAreaWidget, QSplitters, and bottom ToolBox.")
+        print("UIInitializer: Setup main layout with RootEditorAreaWidget and QSplitter. Bottom toolbox removed.")
 
     def _setup_activity_bar(self): # Renamed from _setup_activity_bar_dock
          """设置左侧活动栏 ToolBar"""
@@ -348,59 +351,40 @@ class UIInitializer:
          self.main_window.activity_bar_toolbar.show()
 
     def handle_activity_button_click(self, view_name: str, button: QToolButton):
-        """Handles clicks from activity bar buttons for registered views."""
-        # Toggle the checked state of the button that was clicked
-        # Note: If open_view fails, or if the view is already open and focused,
-        # the button's state should ideally reflect the actual visibility of the dock.
-        # This basic toggle might need refinement if the dock can be closed by other means
-        # and the button state needs to be synced.
-        
-        # First, ensure UIManager opens/focuses the view.
-        # Now, open_view should add to the toolbox if it's a tool, not a dock.
-        # UIManager.open_view needs to be adapted or we handle it here.
-        # For now, let's assume UIManager.open_view will be modified.
-        # If button is checked, open/show in toolbox. If unchecked, hide/remove from toolbox.
-
+        """Handles clicks from activity bar buttons for registered views.
+        Opens views as dock widgets or closes them.
+        """
         if button.isChecked():
-            # Special handling for NoteDownloader as its panel is pre-created
-            if view_name == "NoteDownloader" and self.main_window.note_downloader_panel:
-                # Check if already in toolbox
-                found = False
-                for i in range(self.main_window.tool_box_widget.count()):
-                    if self.main_window.tool_box_widget.widget(i) == self.main_window.note_downloader_panel:
-                        self.main_window.tool_box_widget.setCurrentIndex(i)
-                        found = True
-                        break
-                if not found:
-                    self.main_window.tool_box_widget.addTab(self.main_window.note_downloader_panel, "笔记下载器")
-                    self.main_window.tool_box_widget.setCurrentWidget(self.main_window.note_downloader_panel)
-                self.main_window.note_downloader_panel.show() # Show the panel content
-                self.main_window.tool_box_widget.show() # Ensure toolbox is visible
-            else:
-                # For other views, use UIManager to open them, assuming UIManager will handle adding to toolbox
-                view_instance = self.ui_manager.open_view(view_name, open_in_tool_box=True) # New flag
-                if not view_instance:
-                    button.setChecked(False) # Failed to open
+            # Open the view as a dock widget.
+            # The UIManager's open_view method should handle showing/raising if already open.
+            # NoteDownloader's pre-created panel (self.main_window.note_downloader_panel)
+            # and its content (self.main_window.note_downloader_view_content)
+            # will be handled by UIManager if view_name is "NoteDownloader".
+            # UIManager should use the existing instance if available.
             
-            # Uncheck other tool buttons
-            if hasattr(self.main_window, 'activity_view_buttons'):
-                 for v_name, btn in self.main_window.activity_view_buttons.items():
-                    if btn != button:
-                        btn.setChecked(False)
-        else: # Button was unchecked by user click
-            # Hide/remove the tool from toolbox
-            if view_name == "NoteDownloader" and self.main_window.note_downloader_panel:
-                for i in range(self.main_window.tool_box_widget.count()):
-                    if self.main_window.tool_box_widget.widget(i) == self.main_window.note_downloader_panel:
-                        self.main_window.tool_box_widget.removeTab(i)
-                        # self.main_window.note_downloader_panel.hide() # Panel itself might not need hide if tab is removed
-                        break
-            else:
-                self.ui_manager.close_view_in_tool_box(view_name) # New UIManager method
+            # If view_name is "NoteDownloader", UIManager's open_view will use
+            # self.main_window.note_downloader_view_content.
+            # The self.main_window.note_downloader_panel (PanelWidget) is not used for docking.
+            view_instance_or_dock = self.ui_manager.open_view(view_name, open_in_dock=True, bring_to_front=True)
+            
+            if not view_instance_or_dock:
+                # If opening failed, uncheck the button
+                button.setChecked(False)
+            # else:
+                # UIManager.open_view with bring_to_front=True should handle visibility.
+                # If specific sizing is needed for NoteDownloader, UIManager can handle it.
+                # if view_name == "NoteDownloader" and isinstance(view_instance_or_dock, QDockWidget):
+                #     desired_width = self.main_window.width() // 3 # Example
+                #     view_instance_or_dock.setFixedWidth(desired_width) # Or resizeDocks
 
-            # If toolbox becomes empty, hide it (optional)
-            # if self.main_window.tool_box_widget.count() == 0:
-            #     self.main_window.tool_box_widget.hide()
+        else: # Button was unchecked by user click
+            if hasattr(self.ui_manager, 'close_dock_view'):
+                self.ui_manager.close_dock_view(view_name)
+            else:
+                print(f"Warning: UIManager does not have 'close_dock_view' method. Cannot close/hide {view_name}.")
+                dock_to_close = self.ui_manager.view_docks.get(view_name)
+                if dock_to_close:
+                    dock_to_close.hide()
 
 
     def _toggle_file_explorer_visibility(self, checked):
