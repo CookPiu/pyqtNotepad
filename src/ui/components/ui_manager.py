@@ -193,12 +193,20 @@ class UIManager(QObject): # Inherit from QObject
                 pdf_viewer_tab_widget = PdfViewerView(self.main_window) 
                 if pdf_viewer_tab_widget.load_pdf(abs_pdf_path):
                     tab_name = os.path.basename(abs_pdf_path)
-                    if not self.tab_widget:
-                        QMessageBox.critical(self.main_window, "错误", "标签页管理器未初始化。")
+                    
+                    # Ensure tab_widget is valid, try to get from main_window if UIManager's is None
+                    current_tab_widget = self.tab_widget
+                    if not current_tab_widget and hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget:
+                        current_tab_widget = self.main_window.tab_widget
+                        self.tab_widget = current_tab_widget # Update UIManager's own reference
+
+                    if not current_tab_widget:
+                        QMessageBox.critical(self.main_window, "错误", "标签页管理器未能正确初始化或访问。")
                         pdf_viewer_tab_widget.deleteLater()
                         return
-                    index = self.tab_widget.addTab(pdf_viewer_tab_widget, tab_name)
-                    self.tab_widget.setCurrentIndex(index)
+                        
+                    index = current_tab_widget.addTab(pdf_viewer_tab_widget, tab_name)
+                    current_tab_widget.setCurrentIndex(index)
                     pdf_viewer_tab_widget.setProperty("file_path", abs_pdf_path) 
                     pdf_viewer_tab_widget.setFocus()
                     if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
@@ -374,15 +382,25 @@ class UIManager(QObject): # Inherit from QObject
                  QMessageBox.critical(self.main_window, "打开视图错误", f"创建视图 '{view_name}' 时出错: {e}")
                  return None
         else: # Tabbed view
-            for i in range(self.tab_widget.count()):
-                 widget = self.tab_widget.widget(i)
+            # Ensure tab_widget is valid for tabbed view opening
+            current_tab_widget = self.tab_widget
+            if not current_tab_widget and hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget:
+                current_tab_widget = self.main_window.tab_widget
+                self.tab_widget = current_tab_widget
+
+            if not current_tab_widget:
+                QMessageBox.critical(self.main_window, "错误", "标签页管理器未能用于打开视图。")
+                return None
+
+            for i in range(current_tab_widget.count()):
+                 widget = current_tab_widget.widget(i)
                  if isinstance(widget, view_class):
-                      if bring_to_front: self.tab_widget.setCurrentIndex(i)
+                      if bring_to_front: current_tab_widget.setCurrentIndex(i)
                       return widget
             try:
                  instance = view_class(self.main_window)
-                 index = self.tab_widget.addTab(instance, icon, view_name)
-                 if bring_to_front: self.tab_widget.setCurrentIndex(index)
+                 index = current_tab_widget.addTab(instance, icon, view_name)
+                 if bring_to_front: current_tab_widget.setCurrentIndex(index)
                  return instance
             except Exception as e:
                  QMessageBox.critical(self.main_window, "打开视图错误", f"创建视图 '{view_name}' 时出错: {e}")
@@ -408,10 +426,15 @@ class UIManager(QObject): # Inherit from QObject
          return widget.__class__.__name__
 
     def is_file_open(self, file_path: str) -> bool:
-        if not self.tab_widget: return False
+        current_tab_widget = self.tab_widget
+        if not current_tab_widget and hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget:
+            current_tab_widget = self.main_window.tab_widget
+            self.tab_widget = current_tab_widget
+            
+        if not current_tab_widget: return False
         abs_file_path = os.path.abspath(file_path)
-        for i in range(self.tab_widget.count()):
-            widget = self.tab_widget.widget(i)
+        for i in range(current_tab_widget.count()):
+            widget = current_tab_widget.widget(i)
             # This check needs to be more robust if tabs can contain non-editor widgets with file_path
             editor_path = widget.property("file_path") # Assuming only editor tabs have 'file_path'
             if editor_path and os.path.abspath(editor_path) == abs_file_path:
@@ -419,13 +442,18 @@ class UIManager(QObject): # Inherit from QObject
         return False
 
     def focus_tab_by_filepath(self, file_path: str):
-        if not self.tab_widget: return
+        current_tab_widget = self.tab_widget
+        if not current_tab_widget and hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget:
+            current_tab_widget = self.main_window.tab_widget
+            self.tab_widget = current_tab_widget
+
+        if not current_tab_widget: return
         abs_file_path = os.path.abspath(file_path)
-        for i in range(self.tab_widget.count()):
-            widget = self.tab_widget.widget(i)
+        for i in range(current_tab_widget.count()):
+            widget = current_tab_widget.widget(i)
             editor_path = widget.property("file_path")
             if editor_path and os.path.abspath(editor_path) == abs_file_path:
-                self.tab_widget.setCurrentIndex(i)
+                current_tab_widget.setCurrentIndex(i)
                 break
                     
     def register_speech_recognition(self):

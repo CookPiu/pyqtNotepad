@@ -90,6 +90,8 @@ class _InternalTextEdit(ResizableImageTextEdit):
         self._current_line_color = QColor(Qt.GlobalColor.yellow).lighter(160)
         # Accept rich text for pasting etc.
         self.setAcceptRichText(True)
+        # Disable drops on the editor itself to let MainWindow handle file drops
+        self.setAcceptDrops(False) 
         self._setup_highlight()
         self.evaluator = ExpressionEvaluator() # Instantiate ExpressionEvaluator
 

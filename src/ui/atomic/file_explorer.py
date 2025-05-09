@@ -1,10 +1,12 @@
 # src/ui/atomic/file_explorer.py
 import os
+import re # Added import for regex
+import shutil # Added for rmtree if needed
 from PyQt6.QtWidgets import (QTreeView, QWidget, QVBoxLayout, QHBoxLayout,
-                             QPushButton, QFileDialog, QInputDialog, QMessageBox,
-                             QSizePolicy)
-from PyQt6.QtGui import QFileSystemModel, QIcon, QPalette, QColor
-from PyQt6.QtCore import QDir, Qt, pyqtSignal, QEvent, QModelIndex
+                              QPushButton, QFileDialog, QInputDialog, QMessageBox,
+                              QSizePolicy, QMenu, QLineEdit) # Added QMenu, QLineEdit
+from PyQt6.QtGui import QFileSystemModel, QIcon, QPalette, QColor, QAction # Added QAction
+from PyQt6.QtCore import QDir, Qt, pyqtSignal, QEvent, QModelIndex, QPoint, QStandardPaths # Added QStandardPaths
 
 # Correct relative import from atomic to core
 from ..core.base_widget import BaseWidget
@@ -21,51 +23,84 @@ class FileExplorer(BaseWidget):
     root_path_changed = pyqtSignal(str)
 
     def __init__(self, parent=None, initial_path=None):
-        # Determine initial path: provided, user home, or current working directory
+        # Determine initial path
         if initial_path and os.path.isdir(initial_path):
-            self._current_path = initial_path
+            self._current_path = os.path.normpath(initial_path)
         else:
-            self._current_path = os.path.expanduser("~") # Default to user home
-            if not os.path.isdir(self._current_path):
-                self._current_path = os.getcwd() # Fallback to CWD
-
+            # Default to Desktop, then home, then CWD
+            desktop_path = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
+            if desktop_path and os.path.isdir(desktop_path):
+                self._current_path = desktop_path
+            else:
+                home_path = os.path.expanduser("~")
+                if os.path.isdir(home_path):
+                    self._current_path = home_path
+                else:
+                    self._current_path = os.getcwd()
+        
+        print(f"FileExplorer initial path: {self._current_path}")
         super().__init__(parent) # Calls _init_ui, _connect_signals, _apply_theme
 
     def _init_ui(self):
         """初始化文件浏览器 UI"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0) # No margins for the widget itself
-        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0) 
+        layout.setSpacing(0) # Remove spacing if button is removed
+
+        # --- Top Bar for Actions (e.g., Select Workspace) ---
+        # Button is removed, functionality moved to main menu
+        # top_bar_layout = QHBoxLayout()
+        # top_bar_layout.setContentsMargins(2, 2, 2, 2)
+        # self.select_workspace_button = QPushButton("选择工作区...")
+        # self.select_workspace_button.setToolTip("选择一个新的根文件夹作为工作区")
+        # top_bar_layout.addWidget(self.select_workspace_button)
+        # top_bar_layout.addStretch(1)
+        # layout.addLayout(top_bar_layout)
 
         # --- File System Model ---
         self.model = QFileSystemModel()
-        # Set filters before setting root path for better performance
-        self.model.setFilter(QDir.Filter.AllEntries | QDir.Filter.NoDotAndDotDot | QDir.Filter.Hidden) # Show hidden files
-        self.model.setRootPath(self._current_path) # Set initial root
+        self.model.setFilter(QDir.Filter.AllEntries | QDir.Filter.NoDotAndDotDot | QDir.Filter.Hidden)
+        self.model.setRootPath(self._current_path)
 
         # --- Tree View ---
         self.tree_view = QTreeView()
         self.tree_view.setModel(self.model)
         self.tree_view.setRootIndex(self.model.index(self._current_path))
-        self.tree_view.setAnimated(False) # Animation can be slow with many files
-        self.tree_view.setIndentation(15) # Adjust indentation
+        self.tree_view.setAnimated(False)
+        self.tree_view.setIndentation(15)
         self.tree_view.setSortingEnabled(True)
-        self.tree_view.sortByColumn(0, Qt.SortOrder.AscendingOrder) # Sort by name initially
-
-        # Hide unnecessary columns (Size, Type, Date Modified)
+        self.tree_view.sortByColumn(0, Qt.SortOrder.AscendingOrder)
         self.tree_view.setHeaderHidden(True)
         for i in range(1, self.model.columnCount()):
             self.tree_view.hideColumn(i)
-
-        # Set size policy to expand
         self.tree_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # Context Menu for TreeView
+        self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        # Enable dragging from the tree view
+        self.tree_view.setDragEnabled(True)
+        # self.tree_view.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly) # Recommended
+        # For QFileSystemModel, it might handle internal moves if set to DragDrop.
+        # Let's start with DragOnly to ensure it only initiates drags for external drops.
+        # If DragOnly prevents default mime data generation needed for external drop,
+        # we might need to use DragDrop and then ignore drops on the treeview itself,
+        # or handle mimeData manually in a startDrag method.
+        # QTreeView's default drag behavior with QFileSystemModel should provide necessary URLs.
+        # Let's test default behavior of setDragEnabled(True) first.
+        # If issues, then specify DragDropMode.
+        from PyQt6.QtWidgets import QAbstractItemView # Import for DragDropMode
+        self.tree_view.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+
 
         layout.addWidget(self.tree_view)
         self.setLayout(layout)
 
     def _connect_signals(self):
         """连接信号与槽"""
+        # self.select_workspace_button.clicked.connect(self.browse_for_folder) # Button removed
         self.tree_view.doubleClicked.connect(self._on_item_double_clicked)
+        self.tree_view.customContextMenuRequested.connect(self._show_context_menu)
         # Optional: Connect selection changes if needed
         # self.tree_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
 
@@ -236,3 +271,127 @@ class FileExplorer(BaseWidget):
     #         print(f"Selected: {selected_path}")
     #     else:
     #         print("Selection cleared")
+
+    def _show_context_menu(self, position: QPoint):
+        """在TreeView中显示右键菜单"""
+        index = self.tree_view.indexAt(position)
+        if not index.isValid():
+            return
+
+        menu = QMenu(self.tree_view)
+        
+        rename_action = QAction("重命名", self)
+        rename_action.triggered.connect(lambda: self._rename_item(index))
+        menu.addAction(rename_action)
+
+        delete_action = QAction("删除", self)
+        delete_action.triggered.connect(lambda: self._delete_item(index))
+        menu.addAction(delete_action)
+        
+        menu.exec(self.tree_view.viewport().mapToGlobal(position))
+
+    def _rename_item(self, index: QModelIndex):
+        """重命名选中的文件或文件夹"""
+        if not index.isValid():
+            return
+
+        old_path = self.model.filePath(index)
+        old_name = self.model.fileName(index)
+
+        new_name, ok = QInputDialog.getText(self, "重命名", f"请输入新的名称 '{old_name}':", QLineEdit.EchoMode.Normal, old_name)
+
+        if ok and new_name and new_name != old_name:
+            # Basic validation for new name
+            if not re.match(r'^[a-zA-Z0-9_.\-\s]+$', new_name) or '..' in new_name or '/' in new_name or '\\' in new_name:
+                 QMessageBox.warning(self, "无效名称", "名称包含无效字符。")
+                 return
+
+            parent_index = self.model.parent(index)
+            # QFileSystemModel does not have a direct rename method.
+            # We need to use os.rename and then rely on the model to detect changes,
+            # or refresh the parent directory.
+            # A more robust way with QFileSystemModel is often to remove and re-add,
+            # but that's complex. os.rename is simpler if the model picks it up.
+            
+            # For files, setData with EditRole might work for renaming the display name,
+            # but it doesn't rename on the filesystem.
+            # Let's try os.rename and see if QFileSystemModel updates.
+            # If not, we might need to refresh the parent directory view.
+            
+            new_path = os.path.join(os.path.dirname(old_path), new_name)
+
+            try:
+                # Attempt to rename using QFileSystemModel.setData if it triggers a rename.
+                # This is often not implemented for actual file system rename by QFileSystemModel.
+                # if self.model.setData(index, new_name, Qt.ItemDataRole.EditRole):
+                #    print(f"Renamed '{old_name}' to '{new_name}' using setData (unlikely to work on FS).")
+                # else:
+                #    print(f"setData for rename failed, falling back to os.rename.")
+                
+                # Fallback to os.rename
+                os.rename(old_path, new_path)
+                print(f"Renamed '{old_path}' to '{new_path}' using os.rename.")
+                # QFileSystemModel should ideally pick this up.
+                # If not, a refresh of the parent might be needed, e.g., by resetting root or specific dir.
+                # Forcing a refresh can be disruptive. Let's see if it auto-updates.
+                # If issues, consider:
+                # self.model.setRootPath(self.model.rootPath()) # Force full refresh (heavy)
+                # Or more targeted refresh if possible.
+
+            except OSError as e:
+                QMessageBox.critical(self, "重命名失败", f"无法重命名 '{old_name}':\n{e}")
+            except Exception as e: # Catch any other unexpected errors
+                QMessageBox.critical(self, "重命名错误", f"重命名时发生未知错误:\n{e}")
+
+
+    def _delete_item(self, index: QModelIndex):
+        """删除选中的文件或文件夹"""
+        if not index.isValid():
+            return
+
+        path_to_delete = self.model.filePath(index)
+        is_dir = self.model.isDir(index)
+        item_name = self.model.fileName(index)
+
+        confirm_msg = f"您确定要删除 {'文件夹' if is_dir else '文件'} '{item_name}' 吗？"
+        if is_dir:
+            confirm_msg += "\n此操作无法撤销，文件夹内的所有内容都将被删除。"
+
+        reply = QMessageBox.question(self, "确认删除", confirm_msg,
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # Use QFileSystemModel.remove() for proper integration with the view
+                if self.model.remove(index):
+                    print(f"成功删除: {path_to_delete}")
+                else:
+                    # If model.remove() fails, it might be due to permissions or other issues.
+                    # It could also mean the model doesn't handle recursive deletion well for non-empty dirs.
+                    # QFileSystemModel.remove() should handle both files and directories.
+                    # For directories, it should be recursive.
+                    print(f"QFileSystemModel.remove() 返回 false 对于: {path_to_delete}")
+                    # Fallback for directories if model.remove fails and it's a directory.
+                    # This is less ideal as the model might not update as cleanly.
+                    if is_dir and os.path.exists(path_to_delete): # Check existence before shutil
+                        print(f"尝试使用 shutil.rmtree() 作为后备方案删除目录: {path_to_delete}")
+                        shutil.rmtree(path_to_delete)
+                        print(f"使用 shutil.rmtree() 成功删除: {path_to_delete}")
+                        # Manually trigger a refresh of the parent if needed
+                        parent_index = self.model.parent(index)
+                        # This is a bit of a hack; ideally, model.remove() works.
+                        # self.model.dataChanged.emit(parent_index, parent_index) # This might not be enough
+                        # self.model.layoutChanged.emit() # Too broad
+                        # Simplest heavy-handed refresh:
+                        # current_root = self.model.rootPath()
+                        # self.model.setRootPath("") # Clear
+                        # self.model.setRootPath(current_root) # Reset
+                    elif not is_dir and os.path.exists(path_to_delete): # Fallback for files
+                         os.remove(path_to_delete)
+                         print(f"使用 os.remove() 作为后备方案成功删除文件: {path_to_delete}")
+                    else:
+                         QMessageBox.warning(self, "删除失败", f"无法删除 '{item_name}'. 项目可能已被外部删除或权限不足。")
+
+            except Exception as e:
+                QMessageBox.critical(self, "删除错误", f"删除 '{item_name}' 时出错:\n{e}")

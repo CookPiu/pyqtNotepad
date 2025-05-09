@@ -71,6 +71,7 @@ class HtmlEditor(QWidget): # Changed base class from QWebEngineView
         editor_area_layout.setSpacing(0)
 
         self.source_editor = QPlainTextEdit(self.editor_area_widget) # For HTML source
+        self.source_editor.setAcceptDrops(False) # Disable drops to let MainWindow handle file drops
         self.line_numbers = LineNumberArea(self.source_editor)
         
         editor_area_layout.addWidget(self.line_numbers)

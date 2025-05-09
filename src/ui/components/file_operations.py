@@ -23,13 +23,14 @@ class FileOperations:
         # self.markdown_editor_widget_instance is not strictly needed if new instances are created per tab
         self.untitled_counter = 0 # Initialize counter here
 
-    def new_file(self, file_type="text"):
+    def new_file(self, file_type="text", workspace_path=None):
         """创建新文件
 
         Args:
-            file_type: 文件类型，可以是"text", "html", 或 "markdown"
+            file_type (str): 文件类型，可以是"text", "html", 或 "markdown".
+            workspace_path (str, optional): 当前工作区路径. Defaults to None.
         """
-        editor = None
+        editor = None # This will be the main widget for the tab (e.g., MarkdownEditorWidget)
         tab_name_suffix = ""
         # 根据文件类型选择编辑器组件
         if file_type == "html":
@@ -67,6 +68,8 @@ class FileOperations:
 
         editor.setProperty("file_path", None)
         editor.setProperty("is_new", True)
+        if workspace_path:
+            editor.setProperty("workspace_path", workspace_path)
         editor.setProperty("is_pdf_converted", False) # Assuming not relevant for MD initially
         editor.setProperty("pdf_temp_dir", None) # Assuming not relevant for MD initially
 
@@ -90,24 +93,37 @@ class FileOperations:
         self.main_window.update_edit_actions_state(self.main_window.get_current_editor_widget())
 
 
-    def open_file_dialog(self):
-        """打开文件对话框"""
+    def open_file_dialog(self, initial_dir=None, initial_path=None):
+        """打开文件对话框
+        Args:
+            initial_dir (str, optional): 对话框的初始目录.
+            initial_path (str, optional): 预选的文件路径 (用于从 handle_file_explorer_double_click 调用).
+        """
+        if initial_path and os.path.exists(initial_path): # If a specific file path is provided and exists
+            self.open_file_from_path(initial_path)
+            return
+
+        start_dir = initial_dir or os.getcwd()
         file_name, _ = QFileDialog.getOpenFileName(
-            self.main_window, "打开文件", "", 
+            self.main_window, "打开文件", start_dir,
             "Office 文件 (*.docx *.xlsx *.pptx);;HTML文件 (*.html);;Markdown文件 (*.md *.markdown);;文本文件 (*.txt);;PDF文件 (*.pdf);;所有文件 (*)"
         )
         if file_name:
             self.open_file_from_path(file_name)
 
-    def open_file_from_path(self, file_path):
-        """从路径打开文件"""
+    def open_file_from_path(self, file_path: str, workspace_path: str | None = None):
+        """从路径打开文件
+        Args:
+            file_path (str): 要打开的文件的绝对或相对路径.
+            workspace_path (str, optional): 如果此文件是在特定工作区上下文中打开的.
+        """
         abs_file_path = os.path.abspath(file_path)
         # Check if file is already open using UIManager
         if self.main_window.ui_manager.is_file_open(abs_file_path):
-             self.main_window.ui_manager.focus_tab_by_filepath(abs_file_path)
-             if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
-                  self.main_window.statusBar.showMessage(f"切换到已打开文件: {file_path}")
-             return
+            self.main_window.ui_manager.focus_tab_by_filepath(abs_file_path)
+            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                self.main_window.statusBar.showMessage(f"切换到已打开文件: {file_path}")
+            return
 
         # Determine file type and add tab using add_editor_tab
         try:
@@ -180,18 +196,21 @@ class FileOperations:
                     with open(abs_file_path, 'r', encoding='utf-8') as f: content = f.read()
                 except UnicodeDecodeError:
                     try:
-                         with open(abs_file_path, 'r', encoding='gbk') as f: content = f.read()
+                        with open(abs_file_path, 'r', encoding='gbk') as f: content = f.read() # Try GBK as fallback
                     except Exception as e_gbk:
-                         QMessageBox.critical(self.main_window, "错误", f"无法以 UTF-8 或 GBK 打开文件 '{file_path}':\n{e_gbk}")
-                         return
-                except Exception as e_utf8:
-                     QMessageBox.critical(self.main_window, "错误", f"无法打开文本文件 '{file_path}':\n{e_utf8}")
-                     return
+                        QMessageBox.critical(self.main_window, "错误", f"无法以 UTF-8 或 GBK 打开文件 '{file_path}':\n{e_gbk}")
+                        return
+                except Exception as e_utf8: # Catch other potential errors for UTF-8 read
+                    QMessageBox.critical(self.main_window, "错误", f"无法打开文本文件 '{file_path}':\n{e_utf8}")
+                    return
                 # Add text editor tab
-                self.add_editor_tab(content=content, file_path=abs_file_path, file_type='text', set_current=True)
+                editor_tab = self.add_editor_tab(content=content, file_path=abs_file_path, file_type='text', set_current=True)
+                if editor_tab and workspace_path:
+                    editor_tab.setProperty("workspace_path", workspace_path)
+
 
             if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
-                  self.main_window.statusBar.showMessage(f"已打开: {file_path}")
+                self.main_window.statusBar.showMessage(f"已打开: {file_path}")
 
         except Exception as e:
              QMessageBox.critical(self.main_window, "打开文件错误", f"打开文件 '{file_path}' 时发生未知错误:\n{str(e)}")
@@ -253,9 +272,18 @@ class FileOperations:
 
         current_path = current_tab_container.property("file_path")
         untitled_name = current_tab_container.property("untitled_name")
+        workspace_path = current_tab_container.property("workspace_path") # Get workspace path
         
         suggested_name = os.path.basename(current_path) if current_path else (untitled_name or f"未命名-{self.untitled_counter}")
-        default_dir = os.path.dirname(current_path) if current_path else ""
+        
+        # Determine default directory for save dialog
+        if current_path:
+            default_dir = os.path.dirname(current_path)
+        elif workspace_path and os.path.isdir(workspace_path): # If new file and workspace exists
+            default_dir = workspace_path
+        else: # Fallback to CWD or an empty string if no better option
+            default_dir = os.getcwd()
+
 
         filters = "HTML文件 (*.html);;Markdown文件 (*.md *.markdown);;文本文件 (*.txt);;所有文件 (*)"
         default_filter = "文本文件 (*.txt)"
@@ -284,7 +312,10 @@ class FileOperations:
             try:
                 current_tab_container.setProperty("file_path", abs_file_path)
                 current_tab_container.setProperty("is_new", False)
-                current_tab_container.setProperty("untitled_name", None)
+                current_tab_container.setProperty("untitled_name", None) # Clear untitled name
+                # If workspace_path was set, it remains associated.
+                # Or, if saving outside workspace, this association might become less relevant or cleared.
+                # For now, keep workspace_path if it was there.
 
                 current_index = self.main_window.tab_widget.currentIndex()
                 if current_index != -1 and self.main_window.tab_widget.widget(current_index) == current_tab_container:
@@ -374,7 +405,9 @@ class FileOperations:
         widget_in_tab.deleteLater()
 
         if self.main_window.tab_widget.count() == 0:
-            self.new_file() # Creates a default new file
+            # When last tab is closed, create new file in context of current workspace if available
+            current_workspace = self.main_window.current_workspace_path if hasattr(self.main_window, 'current_workspace_path') else None
+            self.new_file(workspace_path=current_workspace) 
 
         new_current_editor_widget = self.main_window.get_current_editor_widget()
         self.main_window.update_edit_actions_state(new_current_editor_widget)

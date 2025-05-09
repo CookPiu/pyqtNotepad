@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QH
                              QTextEdit, QListWidget, QListWidgetItem, QToolBar, QMenuBar, QMenu,
                              QStatusBar, QFileDialog, QFontDialog, QColorDialog, QMessageBox,
                               QInputDialog, QSplitter, QTabWidget, QToolButton, QDockWidget, QMenu, QSizePolicy)
-from PyQt6.QtGui import QAction, QFont, QColor, QTextCursor, QIcon, QImage, QTextDocument, QPainter, QKeyEvent
+from PyQt6.QtGui import QAction, QFont, QColor, QTextCursor, QIcon, QImage, QTextDocument, QPainter, QKeyEvent, QDragEnterEvent, QDropEvent # Added QDragEnterEvent, QDropEvent
 from PyQt6.QtCore import Qt, QSize, QUrl, QRect, QEvent, pyqtSignal, QPointF, QFile, QTextStream, QPoint, QSignalBlocker, QDateTime, QTimer
 
 from ..core.base_widget import BaseWidget
@@ -29,7 +29,9 @@ class MainWindow(QMainWindow):
         # print("▶ MainWindow.__init__ (Refactored)") # Keep for debug if needed
 
         self.ui_manager = UIManager(self)
-        self.markdown_editor_widget = MarkdownEditorWidget(self) 
+        self.markdown_editor_widget = MarkdownEditorWidget(self)
+        # Initialize current_workspace_path before FileOperations, as it might use it
+        self.current_workspace_path = None 
         self.file_operations = FileOperations(self, self.ui_manager, self.markdown_editor_widget)
         self.edit_operations = EditOperations(self, self.ui_manager)
         self.view_operations = ViewOperations(self, self.ui_manager)
@@ -55,7 +57,26 @@ class MainWindow(QMainWindow):
         self.setDockOptions(QMainWindow.DockOption.AllowTabbedDocks | QMainWindow.DockOption.AnimatedDocks)
         
         self.create_actions()
-        self.ui_initializer.setup_ui() # This creates self.toolbar among other things
+        self.ui_initializer.setup_ui() # This creates self.toolbar and self.file_explorer
+        
+        # Connect signals for FileExplorer after it's created by UIInitializer
+        if hasattr(self, 'file_explorer') and self.file_explorer:
+            self.file_explorer.root_path_changed.connect(self.on_workspace_changed)
+            self.file_explorer.file_double_clicked.connect(self.handle_file_explorer_double_click)
+            
+            # Manually trigger on_workspace_changed with the initial path from FileExplorer
+            # This ensures current_workspace_path is set correctly at startup
+            # and also handles showing the FileExplorer if it was hidden and a valid path is set.
+            initial_fe_path = self.file_explorer.get_root_path()
+            if initial_fe_path and os.path.isdir(initial_fe_path):
+                # Call on_workspace_changed to ensure all related states are updated
+                # This will set self.current_workspace_path and show file explorer if needed.
+                self.on_workspace_changed(initial_fe_path) 
+            else:
+                print(f"MainWindow: FileExplorer initial path ('{initial_fe_path}') is not a valid directory.")
+        else:
+            print("MainWindow: ERROR - self.file_explorer not initialized by UIInitializer, cannot set initial workspace from it.")
+
         self.create_menu_bar()
         self.create_toolbar() 
         
@@ -66,10 +87,20 @@ class MainWindow(QMainWindow):
              self.tab_widget.currentChanged.connect(self.on_current_tab_changed)
              self.on_current_tab_changed(self.tab_widget.currentIndex()) # Initial call
              if self.tab_widget.count() == 0:
-                 if hasattr(self, 'file_operations'): 
-                     self.file_operations.new_file()
-                 else: 
-                     print("MainWindow: ERROR - file_operations not available for initial file.")
+                 # If a workspace path is set (e.g., to Desktop by default from FileExplorer init,
+                 # or by user action later), and no tabs are open, create a new file in that workspace.
+                 # The self.current_workspace_path should be set by on_workspace_changed
+                 # signal from FileExplorer's initialization.
+                 if self.current_workspace_path and os.path.isdir(self.current_workspace_path): 
+                    if hasattr(self, 'file_operations'):
+                        print(f"MainWindow: Creating initial new file in workspace: {self.current_workspace_path}")
+                        self.file_operations.new_file(workspace_path=self.current_workspace_path)
+                    else:
+                        print("MainWindow: ERROR - file_operations not available for initial file.")
+                 else:
+                    print(f"MainWindow: No valid current_workspace_path ('{self.current_workspace_path}') at startup or no tabs, not creating initial file.")
+                 # If current_workspace_path is None or invalid, do not create an initial file and do not show any dialog.
+                 # The user can open a folder or create a new file manually.
         else:
              print("错误：MainWindow 未能创建 tab_widget。")
         
@@ -78,13 +109,25 @@ class MainWindow(QMainWindow):
                 lambda: self.update_edit_actions_state(self.get_current_editor_widget())
             )
         self.update_window_title()
+        self.setAcceptDrops(True) # Enable drag and drop for the main window
+
+    # def set_initial_workspace(self, path: str): # Removed as FileExplorer now defaults to Desktop
+    #     """Sets the initial workspace path for the application."""
+    #     if path and os.path.isdir(path):
+    #         if hasattr(self, 'file_explorer') and self.file_explorer:
+    #             self.file_explorer.set_root_path(path) 
+    #         else: 
+    #             self.current_workspace_path = path 
+    #             print(f"MainWindow: Initial workspace set to {path} before FileExplorer fully ready.")
 
     def create_actions(self):
         self.new_action = QAction("新建文本", self, shortcut="Ctrl+N", toolTip="创建新文本文件", triggered=self.new_file_wrapper)
         self.new_html_action = QAction("新建HTML", self, shortcut="Ctrl+Shift+N", toolTip="创建新HTML文件", triggered=self.new_html_file_wrapper)
         self.new_markdown_action = QAction("新建Markdown", self, shortcut="Ctrl+Alt+N", toolTip="创建新Markdown文件", triggered=self.new_markdown_file_wrapper)
         
-        self.open_action = QAction("打开...", self, shortcut="Ctrl+O", toolTip="打开文件", triggered=self.open_file_dialog_wrapper)
+        self.open_action = QAction("打开文件...", self, shortcut="Ctrl+O", toolTip="打开文件", triggered=self.open_file_dialog_wrapper) # Renamed for clarity
+        self.open_folder_action = QAction("打开文件夹...", self, shortcut="Ctrl+K Ctrl+O", toolTip="打开文件夹作为工作区", triggered=self.open_folder_wrapper) # New action
+        
         self.save_action = QAction("保存", self, shortcut="Ctrl+S", toolTip="保存文件", triggered=self.save_file_wrapper, enabled=False)
         self.save_as_action = QAction("另存为...", self, shortcut="Ctrl+Shift+S", toolTip="另存为", triggered=self.save_file_as_wrapper, enabled=False)
         self.close_tab_action = QAction("关闭标签页", self, shortcut="Ctrl+W", toolTip="关闭标签页", triggered=self.close_current_tab_wrapper, enabled=False)
@@ -121,7 +164,12 @@ class MainWindow(QMainWindow):
     def create_menu_bar(self):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("文件")
-        file_menu.addActions([self.new_action, self.new_html_action, self.new_markdown_action, self.open_action, self.save_action, self.save_as_action])
+        file_menu.addActions([self.new_action, self.new_html_action, self.new_markdown_action])
+        file_menu.addSeparator()
+        file_menu.addAction(self.open_action)
+        file_menu.addAction(self.open_folder_action) # Add new action to menu
+        file_menu.addSeparator()
+        file_menu.addActions([self.save_action, self.save_as_action])
         file_menu.addSeparator()
         file_menu.addAction(self.close_tab_action)
         file_menu.addSeparator()
@@ -165,7 +213,26 @@ class MainWindow(QMainWindow):
 
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(20, 20))
-        self.toolbar.addActions([self.new_action, self.new_html_action, self.new_markdown_action, self.open_action, self.save_action])
+        # self.toolbar.addActions([self.new_action, self.new_html_action, self.new_markdown_action, self.open_action, self.save_action])
+        self.toolbar.addAction(self.new_action)
+        self.toolbar.addAction(self.new_html_action)
+        self.toolbar.addAction(self.new_markdown_action)
+        
+        # Create a QToolButton for "Open" with a dropdown menu
+        open_menu_button = QToolButton(self)
+        open_menu_button.setText("打开") # Or use an icon
+        open_menu_button.setToolTip("打开文件或文件夹")
+        open_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        
+        open_options_menu = QMenu(open_menu_button)
+        open_options_menu.addAction(self.open_action) # "打开文件..."
+        open_options_menu.addAction(self.open_folder_action) # "打开文件夹..."
+        
+        open_menu_button.setMenu(open_options_menu)
+        open_menu_button.setDefaultAction(self.open_action) # Default click action
+        self.toolbar.addWidget(open_menu_button)
+        
+        self.toolbar.addAction(self.save_action)
         self.toolbar.addSeparator()
         self.toolbar.addActions([self.undo_action, self.redo_action])
         self.toolbar.addSeparator()
@@ -200,10 +267,47 @@ class MainWindow(QMainWindow):
         self.toolbar.addWidget(menu_btn)
         self.addAction(self.zen_action)
 
-    def new_file_wrapper(self): self.file_operations.new_file()
-    def new_html_file_wrapper(self): self.file_operations.new_file(file_type="html")
-    def new_markdown_file_wrapper(self): self.file_operations.new_file(file_type="markdown")
-    def open_file_dialog_wrapper(self): self.file_operations.open_file_dialog()
+    def new_file_wrapper(self):
+        if not self.current_workspace_path and hasattr(self, 'file_explorer') and self.file_explorer:
+            QMessageBox.information(self, "选择工作区", "请首先选择一个工作区来创建新文件。")
+            self.file_explorer.browse_for_folder()
+            if not self.current_workspace_path: # User cancelled
+                return
+        self.file_operations.new_file(workspace_path=self.current_workspace_path)
+
+    def new_html_file_wrapper(self):
+        if not self.current_workspace_path and hasattr(self, 'file_explorer') and self.file_explorer:
+            QMessageBox.information(self, "选择工作区", "请首先选择一个工作区来创建新HTML文件。")
+            self.file_explorer.browse_for_folder()
+            if not self.current_workspace_path: # User cancelled
+                return
+        self.file_operations.new_file(file_type="html", workspace_path=self.current_workspace_path)
+
+    def new_markdown_file_wrapper(self):
+        if not self.current_workspace_path and hasattr(self, 'file_explorer') and self.file_explorer:
+            # Since default is Desktop, this prompt might be less frequent unless Desktop path is invalid
+            QMessageBox.information(self, "选择工作区", "当前未指定有效工作区。请选择一个工作区来创建新Markdown文件。")
+            self.open_folder_wrapper() # Use the new menu action's logic
+            if not self.current_workspace_path: # User cancelled
+                return
+        self.file_operations.new_file(file_type="markdown", workspace_path=self.current_workspace_path)
+
+    def open_file_dialog_wrapper(self): 
+        # Open file dialog should default to current workspace, or home/desktop if no workspace
+        default_open_dir = self.current_workspace_path
+        if not default_open_dir or not os.path.isdir(default_open_dir):
+            from PyQt6.QtCore import QStandardPaths
+            default_open_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
+            if not default_open_dir or not os.path.isdir(default_open_dir):
+                default_open_dir = os.path.expanduser("~")
+        self.file_operations.open_file_dialog(initial_dir=default_open_dir)
+
+    def open_folder_wrapper(self):
+        """Wrapper to open folder chooser and set as workspace."""
+        if hasattr(self, 'file_explorer') and self.file_explorer:
+            self.file_explorer.browse_for_folder()
+            # self.current_workspace_path will be updated by on_workspace_changed signal
+
     def save_file_wrapper(self): self.file_operations.save_file()
     def save_file_as_wrapper(self): self.file_operations.save_file_as()
     def close_current_tab_wrapper(self):
@@ -430,3 +534,81 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.file_operations.close_all_tabs(): event.accept()
         else: event.ignore()
+
+    # --- Custom Slots for Workspace and File Explorer Interaction ---
+    def on_workspace_changed(self, new_path: str):
+        """Slot to handle workspace path changes from FileExplorer."""
+        self.current_workspace_path = new_path
+        if hasattr(self, 'statusBar') and self.statusBar: # Check if statusBar exists
+            self.statusBar.showMessage(f"工作区已更改为: {new_path}", 5000)
+        
+        # Ensure the file explorer panel is visible after a workspace is chosen
+        if hasattr(self, 'file_explorer') and self.file_explorer:
+            if not self.file_explorer.isVisible():
+                self.file_explorer.show() # Directly show the panel
+            
+            # Synchronize the activity bar button's state
+            if hasattr(self, 'toggle_sidebar_button') and self.toggle_sidebar_button:
+                if not self.toggle_sidebar_button.isChecked():
+                    # Set checked without re-triggering the slot that UIInitializer connects to 'clicked'
+                    # QToolButton's setChecked does not emit clicked(), but toggled(bool).
+                    # The UIInitializer connects to 'clicked', so this should be fine.
+                    # The button's visual state will update.
+                    # The actual visibility is handled by file_explorer.show() above.
+                    # And when user clicks the button, UIInitializer's slot will handle it.
+                    self.toggle_sidebar_button.setChecked(True)
+        
+        # Update window title or other UI elements if needed
+        # self.update_window_title() # Could incorporate workspace path into title
+
+    def handle_file_explorer_double_click(self, file_path: str):
+        """Slot to handle file double-click from FileExplorer."""
+        if hasattr(self.file_operations, 'open_file_from_path') and callable(getattr(self.file_operations, 'open_file_from_path')):
+            self.file_operations.open_file_from_path(file_path)
+        elif hasattr(self.file_operations, 'open_file_dialog') and callable(getattr(self.file_operations, 'open_file_dialog')):
+            # Fallback: use open_file_dialog, passing the path.
+            # This isn't ideal as open_file_dialog itself shows a dialog.
+            # The preferred method is open_file_from_path.
+            print(f"MainWindow: open_file_from_path not found, attempting fallback with open_file_dialog for {file_path}")
+            self.file_operations.open_file_dialog(initial_path=file_path)
+        else:
+            QMessageBox.warning(self, "打开文件错误", f"无法处理文件打开请求: {file_path}\nFileOperations模块不完整。")
+            print(f"MainWindow: ERROR - Cannot open file from explorer: {file_path}. FileOperations methods missing.")
+
+    # --- Drag and Drop Event Handlers ---
+    def dragEnterEvent(self, event: QDragEnterEvent): # Corrected type hint
+        mime_data = event.mimeData()
+        # We are interested in file URLs
+        if mime_data.hasUrls():
+            # Check if at least one URL is a local file
+            for url in mime_data.urls():
+                if url.isLocalFile():
+                    event.acceptProposedAction() # Accept the drag if it contains local files
+                    return
+        event.ignore() # Otherwise, ignore the drag
+
+    def dropEvent(self, event: QDropEvent): # Corrected type hint
+        mime_data = event.mimeData()
+        if mime_data.hasUrls():
+            files_to_open = []
+            for url in mime_data.urls():
+                if url.isLocalFile():
+                    file_path = url.toLocalFile()
+                    if os.path.isfile(file_path): # Ensure it's a file, not a directory
+                        files_to_open.append(file_path)
+            
+            if files_to_open:
+                event.acceptProposedAction() # Crucial: accept the drop action
+                for f_path in files_to_open:
+                    if hasattr(self.file_operations, 'open_file_from_path'):
+                        self.file_operations.open_file_from_path(f_path)
+                    else:
+                        print(f"MainWindow: Cannot open dropped file {f_path}, open_file_from_path is missing.")
+                # After handling, ensure the event is marked as accepted and stop further processing by child widgets.
+                # For QMainWindow, accepting the event should be enough.
+                # If child widgets (like QTextEdit) still process it, they might need their acceptDrops set to False
+                # or their own dropEvents overridden to ignore if the parent (MainWindow) handled it.
+                return 
+        
+        # If the drop doesn't contain URLs or no valid files were found, ignore it.
+        event.ignore()

@@ -7,7 +7,7 @@ src_path = os.path.join(project_root, 'src')
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QFileDialog # Added QFileDialog
 from PyQt6.QtCore import Qt
 # Now this import should work if src is in sys.path and src/ui/main has __init__.py
 from src.ui.main.main_window import MainWindow # Updated import path
@@ -23,10 +23,23 @@ if __name__ == "__main__":
     # Ensure the application style is set early, if applicable
     # For example, if using Fusion style: app.setStyle("Fusion")
 
+    # Prompt for workspace before creating MainWindow fully
+    # This dialog needs an active QApplication, so it's placed after app creation.
+    # However, to pass it to MainWindow's init or a setter before show(),
+    # we might need a more integrated approach or pass it after creation but before show.
+    
+    # Option 1: Prompt here and pass to a setter method in MainWindow
+    # initial_workspace = QFileDialog.getExistingDirectory(None, "选择初始工作区", os.path.expanduser("~")) # Removed initial prompt
+
     print("▶ Creating MainWindow instance...")
     try:
         window = MainWindow()
         print("▶ MainWindow instance created.")
+
+        # if initial_workspace and hasattr(window, 'set_initial_workspace'): # Removed initial prompt logic
+        #     print(f"▶ Setting initial workspace: {initial_workspace}")
+        #     window.set_initial_workspace(initial_workspace)
+        
         print("▶ Calling window.show()...")
         window.show()
         print("▶ window.show() called.")

@@ -233,6 +233,7 @@ class MarkdownEditorWidget(QWidget):
         editor_area_layout.setSpacing(0)
 
         self.editor = QPlainTextEdit(self.editor_area_widget)
+        self.editor.setAcceptDrops(False) # Disable drops to let MainWindow handle file drops
         self.line_numbers = LineNumberArea(self.editor) # Pass editor to LineNumberArea
         self.highlighter = MarkdownHighlighter(self.editor.document())
         
