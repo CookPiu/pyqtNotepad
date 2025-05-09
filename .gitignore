@@ -1,7 +1,14 @@
 src/__pycache__/__init__.cpython-312.pyc
 src/services/__pycache__/__init__.cpython-312.pyc
 src/services/__pycache__/format_service.cpython-312.pyc
-
+src/ui/__pycache__
+src/ui/atomic/__pycache__
+src/ui/atomic/calendar/__pycache__
+src/ui/atomic/mini_tools/__pyache__
+src/ui/composite/__pycache__
+src/ui/main/__pycache__
+src/ui/core/__pycache__
+str/ui/views/__pycache__
 src/ui/__pycache__/__init__.cpython-312.pyc
 src/ui/__pycache__/calculator_widget.cpython-312.pyc
 src/ui/__pycache__/calendar_widget.cpython-312.pyc

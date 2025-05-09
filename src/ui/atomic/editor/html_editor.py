@@ -1,10 +1,10 @@
 import os
 from PyQt6.QtWidgets import (QWidget, QPlainTextEdit, QVBoxLayout, QHBoxLayout, 
-                             QStackedWidget, QFrame) # QWebEngineView imported below
+                             QStackedWidget, QFrame, QTextEdit, QToolBar) # Added QTextEdit, QToolBar
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QUrl, QRect, QSize
-from PyQt6.QtGui import QColor, QPainter, QTextCharFormat, QFont, QPalette, QTextCursor, QPaintEvent # Added QPaintEvent
+from PyQt6.QtGui import QColor, QPainter, QTextCharFormat, QFont, QPalette, QTextCursor, QPaintEvent, QIcon, QAction, QTextListFormat # Added QPaintEvent, QIcon, QAction, QTextListFormat
 
 # Re-using LineNumberArea similar to MarkdownEditorWidget
 class LineNumberArea(QWidget):
@@ -56,15 +56,30 @@ class LineNumberArea(QWidget):
             bottom_y_viewport = top_y_viewport + block_geom.height()
             block_number += 1
 
-class HtmlEditor(QWidget): # Changed base class from QWebEngineView
+class RichTextEditor(QTextEdit):
+    """富文本编辑器组件，用于所见即所得的HTML编辑"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptRichText(True)
+        # 设置默认字体和样式
+        font = QFont("Arial", 10)
+        self.setFont(font)
+        # 启用HTML支持
+        self.document().setDefaultStyleSheet("body { font-family: Arial; font-size: 10pt; }")
+
+    def insertFromMimeData(self, source):
+        # 重写此方法以支持粘贴图片和富文本
+        super().insertFromMimeData(source)
+
+class HtmlEditor(QWidget):
     document_modified = pyqtSignal(bool)
-    view_mode_changed = pyqtSignal(bool) # True for preview, False for editor
+    view_mode_changed = pyqtSignal(int) # 0: 源码, 1: 预览, 2: 富文本编辑
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_base_url = QUrl.fromLocalFile(os.getcwd() + os.path.sep) # Default base URL, ensure trailing slash
 
-        # Editor part with line numbers for HTML source
+        # 源码编辑器部分，带行号
         self.editor_area_widget = QWidget(self)
         editor_area_layout = QHBoxLayout(self.editor_area_widget)
         editor_area_layout.setContentsMargins(0,0,0,0)
@@ -78,17 +93,41 @@ class HtmlEditor(QWidget): # Changed base class from QWebEngineView
         editor_area_layout.addWidget(self.source_editor)
         self.editor_area_widget.setLayout(editor_area_layout)
 
-        # Preview part
+        # 预览部分
         self.preview = QWebEngineView(self)
         settings = self.preview.page().settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
         
-        # Stacked widget to switch between editor and preview
+        # 富文本编辑器部分
+        self.rich_text_container = QWidget(self)
+        rich_text_layout = QVBoxLayout(self.rich_text_container)
+        rich_text_layout.setContentsMargins(0,0,0,0)
+        
+        # 添加富文本编辑工具栏
+        self.rich_text_toolbar = QToolBar("富文本编辑工具栏")
+        self.rich_text_toolbar.setIconSize(QSize(16, 16))
+        
+        # 创建富文本编辑器
+        self.rich_text_editor = RichTextEditor(self)
+        self.rich_text_editor.textChanged.connect(self._on_rich_text_changed)
+        
+        # 添加常用格式化操作
+        self._setup_rich_text_toolbar()
+        
+        rich_text_layout.addWidget(self.rich_text_toolbar)
+        rich_text_layout.addWidget(self.rich_text_editor)
+        
+        # 使用堆叠小部件在三种模式之间切换
         self.stacked_widget = QStackedWidget(self)
-        self.editor_page_index = self.stacked_widget.addWidget(self.editor_area_widget)
-        self.preview_page_index = self.stacked_widget.addWidget(self.preview)
+        self.SOURCE_MODE = 0
+        self.PREVIEW_MODE = 1
+        self.RICH_TEXT_MODE = 2
+        
+        self.editor_page_index = self.stacked_widget.addWidget(self.editor_area_widget)  # 索引 0
+        self.preview_page_index = self.stacked_widget.addWidget(self.preview)            # 索引 1
+        self.rich_text_page_index = self.stacked_widget.addWidget(self.rich_text_container) # 索引 2
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0,0,0,0)
@@ -97,6 +136,8 @@ class HtmlEditor(QWidget): # Changed base class from QWebEngineView
 
         self._render_timer = QTimer(self, interval=250, singleShot=True) # Timer for preview update
         self._render_timer.timeout.connect(self._update_preview_from_source)
+        self._rich_to_source_timer = QTimer(self, interval=500, singleShot=True) # 富文本到源码的更新定时器
+        self._rich_to_source_timer.timeout.connect(self._update_source_from_rich_text)
 
         # Connect signals for line number area updates
         self.source_editor.blockCountChanged.connect(self._update_line_number_area_width)
@@ -106,7 +147,7 @@ class HtmlEditor(QWidget): # Changed base class from QWebEngineView
         self.source_editor.textChanged.connect(self._on_source_editor_text_changed)
         self.source_editor.document().modificationChanged.connect(self.document_modified)
 
-        self.is_preview_mode = False # Start in editor mode
+        self.current_mode = self.SOURCE_MODE # 默认从源码模式开始
         self.stacked_widget.setCurrentIndex(self.editor_page_index)
         self._update_line_number_area_width()
         self.setHtml("<!DOCTYPE html>\n<html>\n<head>\n    <title>New HTML Page</title>\n</head>\n<body>\n    <h1>Hello, HTML!</h1>\n</body>\n</html>")
@@ -130,48 +171,173 @@ class HtmlEditor(QWidget): # Changed base class from QWebEngineView
         if rect.contains(self.source_editor.viewport().rect()):
             self._update_line_number_area_width()
 
+    def _setup_rich_text_toolbar(self):
+        """设置富文本编辑器工具栏"""
+        # 文本格式化操作
+        bold_action = QAction("粗体", self)
+        bold_action.setShortcut("Ctrl+B")
+        bold_action.triggered.connect(lambda: self.rich_text_editor.setFontWeight(
+            QFont.Weight.Bold if self.rich_text_editor.fontWeight() < QFont.Weight.Bold else QFont.Weight.Normal))
+        self.rich_text_toolbar.addAction(bold_action)
+        
+        italic_action = QAction("斜体", self)
+        italic_action.setShortcut("Ctrl+I")
+        italic_action.triggered.connect(self.rich_text_editor.setFontItalic)
+        self.rich_text_toolbar.addAction(italic_action)
+        
+        underline_action = QAction("下划线", self)
+        underline_action.setShortcut("Ctrl+U")
+        underline_action.triggered.connect(self.rich_text_editor.setFontUnderline)
+        self.rich_text_toolbar.addAction(underline_action)
+        
+        self.rich_text_toolbar.addSeparator()
+        
+        # 对齐方式
+        align_left_action = QAction("左对齐", self)
+        align_left_action.triggered.connect(lambda: self.rich_text_editor.setAlignment(Qt.AlignmentFlag.AlignLeft))
+        self.rich_text_toolbar.addAction(align_left_action)
+        
+        align_center_action = QAction("居中", self)
+        align_center_action.triggered.connect(lambda: self.rich_text_editor.setAlignment(Qt.AlignmentFlag.AlignCenter))
+        self.rich_text_toolbar.addAction(align_center_action)
+        
+        align_right_action = QAction("右对齐", self)
+        align_right_action.triggered.connect(lambda: self.rich_text_editor.setAlignment(Qt.AlignmentFlag.AlignRight))
+        self.rich_text_toolbar.addAction(align_right_action)
+        
+        self.rich_text_toolbar.addSeparator()
+        
+        # 列表
+        bullet_list_action = QAction("项目符号", self)
+        bullet_list_action.triggered.connect(self._toggle_bullet_list)
+        self.rich_text_toolbar.addAction(bullet_list_action)
+        
+        # 插入图片
+        insert_image_action = QAction("插入图片", self)
+        insert_image_action.triggered.connect(self._insert_image_to_rich_text)
+        self.rich_text_toolbar.addAction(insert_image_action)
+    
+    def _toggle_bullet_list(self):
+        """切换项目符号列表"""
+        cursor = self.rich_text_editor.textCursor()
+        list_format = cursor.blockFormat()
+        
+        if list_format.indent() == 0:
+            list_format.setIndent(1)
+            cursor.setBlockFormat(list_format)
+            list_style = QTextListFormat()
+            list_style.setStyle(QTextListFormat.Style.ListDisc)
+            cursor.createList(list_style)
+        else:
+            list_format.setIndent(0)
+            cursor.setBlockFormat(list_format)
+        
+    def _insert_image_to_rich_text(self):
+        """在富文本编辑器中插入图片"""
+        from PyQt6.QtWidgets import QFileDialog
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, "选择图片", "",
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
+        if file_name:
+            self.rich_text_editor.insertHtml(f'<img src="{file_name}" />')
+    
     def _on_source_editor_text_changed(self):
-        self.document_modified.emit(True) # Source has changed
-        if self.is_preview_mode: # If preview is active, update it
-            self._render_timer.start() 
-
-    def _update_preview_from_source(self): # Uses self._current_base_url
+        self.document_modified.emit(True) # 源码已更改
+        if self.current_mode == self.PREVIEW_MODE: # 如果预览处于活动状态，则更新它
+            self._render_timer.start()
+        elif self.current_mode == self.RICH_TEXT_MODE: # 如果富文本编辑器处于活动状态，也需要更新
+            # 这里我们需要小心，避免循环更新
+            # 只有当源码编辑器的内容变化不是由富文本编辑器引起的时才更新富文本编辑器
+            if not self._rich_to_source_timer.isActive():
+                self._update_rich_text_from_source()
+    
+    def _on_rich_text_changed(self):
+        """富文本编辑器内容变化时的处理"""
+        self.document_modified.emit(True) # 内容已更改
+        # 启动定时器，延迟更新源码，避免频繁更新
+        self._rich_to_source_timer.start()
+    
+    def _update_preview_from_source(self): # 使用 self._current_base_url
         html_source = self.source_editor.toPlainText()
-        # print(f"HtmlEditor: Updating preview with baseUrl: {self._current_base_url.toString()}") # Debug
         if self.preview.page():
             self.preview.page().setHtml(html_source, self._current_base_url)
-        else: # Should ideally not happen if page is always available
+        else: # 如果页面不可用，应该不会发生
             self.preview.setHtml(html_source, self._current_base_url)
+    
+    def _update_rich_text_from_source(self):
+        """从源码更新富文本编辑器"""
+        html_source = self.source_editor.toPlainText()
+        self.rich_text_editor.setHtml(html_source)
+    
+    def _update_source_from_rich_text(self):
+        """从富文本编辑器更新源码"""
+        rich_html = self.rich_text_editor.toHtml()
+        # 阻止源码编辑器的textChanged信号触发_on_source_editor_text_changed
+        # 这样可以避免循环更新
+        self.source_editor.blockSignals(True)
+        self.source_editor.setPlainText(rich_html)
+        self.source_editor.blockSignals(False)
+        # 如果预览模式是活动的，也更新预览
+        if self.current_mode == self.PREVIEW_MODE:
+            self._update_preview_from_source()
 
 
-    def set_preview_visible(self, show_preview: bool):
-        """Switches between HTML source editor and preview."""
-        mode_actually_changed = False
-        if show_preview:
-            if not self.is_preview_mode or self.stacked_widget.currentWidget() != self.preview:
-                self._update_preview_from_source() # Update preview before showing
-                self.stacked_widget.setCurrentIndex(self.preview_page_index)
-                self.is_preview_mode = True
-                mode_actually_changed = True
-        else: 
-            if self.is_preview_mode or self.stacked_widget.currentWidget() != self.editor_area_widget:
-                self.stacked_widget.setCurrentIndex(self.editor_page_index)
-                self.source_editor.setFocus()
-                self.is_preview_mode = False
-                mode_actually_changed = True
+    def set_edit_mode(self, mode: int):
+        """设置编辑模式: 0=源码, 1=预览, 2=富文本编辑"""
+        if mode < 0 or mode > 2:
+            return
+            
+        if mode == self.current_mode:
+            return
+            
+        old_mode = self.current_mode
+        self.current_mode = mode
         
-        if mode_actually_changed:
-            self.view_mode_changed.emit(self.is_preview_mode)
+        # 在切换模式前同步内容
+        if old_mode == self.SOURCE_MODE:
+            # 从源码模式切换出来，需要更新预览和富文本
+            if mode == self.PREVIEW_MODE:
+                self._update_preview_from_source()
+            elif mode == self.RICH_TEXT_MODE:
+                self._update_rich_text_from_source()
+                
+        elif old_mode == self.RICH_TEXT_MODE:
+            # 从富文本模式切换出来，需要更新源码和预览
+            self._update_source_from_rich_text()
+            if mode == self.PREVIEW_MODE:
+                self._update_preview_from_source()
+        
+        # 切换到目标模式
+        if mode == self.SOURCE_MODE:
+            self.stacked_widget.setCurrentIndex(self.editor_page_index)
+            self.source_editor.setFocus()
+        elif mode == self.PREVIEW_MODE:
+            self.stacked_widget.setCurrentIndex(self.preview_page_index)
+            self.preview.setFocus()
+        elif mode == self.RICH_TEXT_MODE:
+            self.stacked_widget.setCurrentIndex(self.rich_text_page_index)
+            self.rich_text_editor.setFocus()
+            
+        # 发出模式变化信号
+        self.view_mode_changed.emit(mode)
+    
+    def set_preview_visible(self, show_preview: bool):
+        """在源码编辑器和预览之间切换（向后兼容）"""
+        if show_preview:
+            self.set_edit_mode(self.PREVIEW_MODE)
+        else:
+            self.set_edit_mode(self.SOURCE_MODE)
 
-    # --- Content Access Methods ---
+    # --- 内容访问方法 ---
     def setHtml(self, html_source: str, baseUrl: QUrl = QUrl()):
         self.source_editor.setPlainText(html_source)
-        if baseUrl.isValid() and not baseUrl.isEmpty(): # Check if a valid, non-empty baseUrl is provided
+        if baseUrl.isValid() and not baseUrl.isEmpty(): # 检查是否提供了有效的非空baseUrl
             self._current_base_url = baseUrl
-            # print(f"HtmlEditor: Base URL set to: {self._current_base_url.toString()}") # Debug
-        # else, it keeps the last valid one or the default from __init__
         
-        self._update_preview_from_source() # This will now use the updated self._current_base_url
+        # 更新预览和富文本编辑器
+        self._update_preview_from_source() 
+        self._update_rich_text_from_source()
         self.source_editor.document().setModified(False)
 
 
@@ -208,16 +374,18 @@ class HtmlEditor(QWidget): # Changed base class from QWebEngineView
         self.source_editor.setPalette(palette)
         # Current line highlight for QPlainTextEdit can be added if needed, similar to MarkdownEditorWidget
 
-    # --- Focus and other QWidget methods ---
+    # --- 焦点和其他QWidget方法 ---
     def setFocus(self):
-        if self.is_preview_mode:
+        if self.current_mode == self.PREVIEW_MODE:
             self.preview.setFocus()
+        elif self.current_mode == self.RICH_TEXT_MODE:
+            self.rich_text_editor.setFocus()
         else:
             self.source_editor.setFocus()
 
 if __name__ == '__main__':
     import sys
-    from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton
+    from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QButtonGroup, QRadioButton
     class TestHtmlEditorWindow(QMainWindow):
         def __init__(self):
             super().__init__()
@@ -228,14 +396,37 @@ if __name__ == '__main__':
             toolbar = QToolBar("HTML Tools")
             self.addToolBar(toolbar)
             
-            self.toggle_action = QAction("Toggle Preview", self, checkable=True)
-            self.toggle_action.setChecked(False) # Start in editor mode
-            self.toggle_action.triggered.connect(self.editor.set_preview_visible)
-            toolbar.addAction(self.toggle_action)
-            self.editor.view_mode_changed.connect(self.toggle_action.setChecked)
+            # 创建模式切换按钮组
+            self.mode_group = QButtonGroup(self)
+            
+            self.source_btn = QRadioButton("源码", self)
+            self.source_btn.setChecked(True) # 默认选中源码模式
+            self.mode_group.addButton(self.source_btn, 0)
+            toolbar.addWidget(self.source_btn)
+            
+            self.preview_btn = QRadioButton("预览", self)
+            self.mode_group.addButton(self.preview_btn, 1)
+            toolbar.addWidget(self.preview_btn)
+            
+            self.rich_text_btn = QRadioButton("富文本编辑", self)
+            self.mode_group.addButton(self.rich_text_btn, 2)
+            toolbar.addWidget(self.rich_text_btn)
+            
+            # 连接模式切换信号
+            self.mode_group.idClicked.connect(self.editor.set_edit_mode)
+            self.editor.view_mode_changed.connect(self._on_mode_changed)
 
-            self.editor.setHtml("<h1>Hello World</h1><p>This is a test HTML document.</p><img src='https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png'>")
+            self.editor.setHtml("<h1>Hello World</h1><p>This is a test HTML document.</p><p>Try editing in <b>rich text mode</b>!</p>")
             self.setGeometry(100, 100, 900, 600)
+        
+        def _on_mode_changed(self, mode):
+            # 更新按钮状态
+            if mode == 0:
+                self.source_btn.setChecked(True)
+            elif mode == 1:
+                self.preview_btn.setChecked(True)
+            elif mode == 2:
+                self.rich_text_btn.setChecked(True)
 
     app = QApplication(sys.argv)
     win = TestHtmlEditorWindow()

@@ -1,7 +1,9 @@
+# 合并自所有项目依赖
+# 主项目依赖
 PyQt6>=6.6.0
+PyQt6-WebEngine>=6.6.0
 PyMuPDF>=1.24.1
 markdown-it-py>=3.0
-PyQt6-WebEngine>=6.6
 markdownify>=0.11.6
 pywin32
 pyaudio
@@ -10,3 +12,12 @@ chardet
 PyYAML
 beautifulsoup4
 lxml
+
+# note_downloader 依赖
+requests
+tqdm
+selenium
+webdriver-manager
+pypdf2
+python-pptx
+python-docx

@@ -166,6 +166,7 @@ class MainWindow(QMainWindow):
 
         self.toggle_markdown_preview_action = QAction("MD 预览↔源码", self, checkable=True, shortcut="Ctrl+Shift+M", toolTip="切换Markdown预览/源码", triggered=self.toggle_markdown_preview_panel_wrapper, enabled=False)
         self.toggle_html_preview_action = QAction("HTML 预览↔源码", self, checkable=True, shortcut="Ctrl+Shift+H", toolTip="切换HTML预览/源码", triggered=self.toggle_html_preview_panel_wrapper, enabled=False)
+        self.toggle_html_richtext_action = QAction("HTML 富文本编辑", self, checkable=True, shortcut="Ctrl+Shift+R", toolTip="切换HTML富文本编辑模式", triggered=self.toggle_html_richtext_panel_wrapper, enabled=False)
 
         self.about_action = QAction("关于", self, toolTip="关于", triggered=self.show_about_wrapper)
 
@@ -206,6 +207,7 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         view_menu.addAction(self.toggle_markdown_preview_action)
         view_menu.addAction(self.toggle_html_preview_action)
+        view_menu.addAction(self.toggle_html_richtext_action)
         view_menu.addSeparator()
         view_menu.addActions([self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action])
         
@@ -248,7 +250,7 @@ class MainWindow(QMainWindow):
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.translate_action)
         self.toolbar.addSeparator()
-        self.toolbar.addActions([self.toggle_markdown_preview_action, self.toggle_html_preview_action])
+        self.toolbar.addActions([self.toggle_markdown_preview_action, self.toggle_html_preview_action, self.toggle_html_richtext_action])
         
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -367,10 +369,54 @@ class MainWindow(QMainWindow):
         if isinstance(current_tab_container, MarkdownEditorWidget):
             current_tab_container.set_preview_visible(checked)
 
-    def toggle_html_preview_panel_wrapper(self, checked):
+    def toggle_html_preview_panel_wrapper(self, checked=None):
+        """切换HTML预览面板"""
         current_tab_container = self.tab_widget.currentWidget()
         if isinstance(current_tab_container, HtmlEditor):
-            current_tab_container.set_preview_visible(checked)
+            # 如果当前是富文本模式，先切换回源码模式
+            if current_tab_container.current_mode == current_tab_container.RICH_TEXT_MODE:
+                current_tab_container.set_edit_mode(current_tab_container.SOURCE_MODE)
+                self.toggle_html_richtext_action.setChecked(False)
+            
+            # 然后切换到预览模式或源码模式
+            if checked is None: # 如果未指定，则切换
+                checked = not (current_tab_container.current_mode == current_tab_container.PREVIEW_MODE)
+            
+            # 设置为预览模式或源码模式
+            current_tab_container.set_edit_mode(current_tab_container.PREVIEW_MODE if checked else current_tab_container.SOURCE_MODE)
+            self.toggle_html_preview_action.setChecked(checked) # 更新动作状态
+            self.update_edit_actions_state(current_tab_container)
+    
+    def toggle_html_richtext_panel_wrapper(self, checked=None):
+        """切换HTML富文本编辑模式"""
+        current_tab_container = self.tab_widget.currentWidget()
+        if isinstance(current_tab_container, HtmlEditor):
+            # 如果当前是预览模式，先切换回源码模式
+            if current_tab_container.current_mode == current_tab_container.PREVIEW_MODE:
+                current_tab_container.set_edit_mode(current_tab_container.SOURCE_MODE)
+                self.toggle_html_preview_action.setChecked(False)
+            
+            # 然后切换到富文本模式或源码模式
+            if checked is None: # 如果未指定，则切换
+                checked = not (current_tab_container.current_mode == current_tab_container.RICH_TEXT_MODE)
+            
+            # 设置为富文本模式或源码模式
+            current_tab_container.set_edit_mode(current_tab_container.RICH_TEXT_MODE if checked else current_tab_container.SOURCE_MODE)
+            self.toggle_html_richtext_action.setChecked(checked) # 更新动作状态
+            self.update_edit_actions_state(current_tab_container)
+    
+    def _on_html_editor_mode_changed(self, mode):
+        """处理HTML编辑器模式变化的信号"""
+        # 根据模式更新工具栏按钮状态
+        editor_widget = self.get_current_editor_widget()
+        if isinstance(editor_widget, HtmlEditor):
+            self.toggle_html_preview_action.setChecked(mode == editor_widget.PREVIEW_MODE)
+            self.toggle_html_richtext_action.setChecked(mode == editor_widget.RICH_TEXT_MODE)
+        
+        # 更新编辑操作状态
+        editor_widget = self.get_current_editor_widget()
+        if editor_widget:
+            self.update_edit_actions_state(editor_widget)
 
     def zoom_in(self): 
         self.current_zoom_factor=min(self.max_zoom_factor,self.current_zoom_factor+self.zoom_step)
@@ -452,11 +498,19 @@ class MainWindow(QMainWindow):
 
         if isinstance(current_tab_container_widget, HtmlEditor):
             self.toggle_html_preview_action.setEnabled(True)
-            current_tab_container_widget.view_mode_changed.connect(self.toggle_html_preview_action.setChecked)
-            self.toggle_html_preview_action.setChecked(current_tab_container_widget.is_preview_mode)
+            self.toggle_html_richtext_action.setEnabled(True)
+            
+            # 连接模式变化信号
+            current_tab_container_widget.view_mode_changed.connect(self._on_html_editor_mode_changed)
+            
+            # 设置初始状态
+            self.toggle_html_preview_action.setChecked(current_tab_container_widget.current_mode == current_tab_container_widget.PREVIEW_MODE)
+            self.toggle_html_richtext_action.setChecked(current_tab_container_widget.current_mode == current_tab_container_widget.RICH_TEXT_MODE)
         else:
             self.toggle_html_preview_action.setEnabled(False)
             self.toggle_html_preview_action.setChecked(False)
+            self.toggle_html_richtext_action.setEnabled(False)
+            self.toggle_html_richtext_action.setChecked(False)
         
         self.previous_editor = current_tab_container_widget
 
@@ -503,6 +557,17 @@ class MainWindow(QMainWindow):
             elif 'video_player_view' in module_path:
                 is_video_view = True
 
+        # 检查当前标签页是否为HTML编辑器或Markdown编辑器
+        is_markdown_tab = isinstance(current_tab_container, MarkdownEditorWidget)
+        is_html_tab = isinstance(current_tab_container, HtmlEditor)
+
+        # 如果是HTML编辑器，确保HTML预览和富文本编辑按钮始终启用
+        if is_html_tab:
+            self.toggle_html_preview_action.setEnabled(True)
+            self.toggle_html_richtext_action.setEnabled(True)
+            self.toggle_html_preview_action.setChecked(current_tab_container.current_mode == current_tab_container.PREVIEW_MODE)
+            self.toggle_html_richtext_action.setChecked(current_tab_container.current_mode == current_tab_container.RICH_TEXT_MODE)
+
         if not is_known_editor and not is_image_view and not is_video_view:
             for action in all_editor_actions:
                 action.setEnabled(False)
@@ -510,8 +575,16 @@ class MainWindow(QMainWindow):
             clipboard = QApplication.clipboard()
             self.paste_action.setEnabled(bool(clipboard.text())) # Paste might still be possible
             self.close_tab_action.setEnabled(self.tab_widget.count() > 0 if self.tab_widget else False)
-            self.toggle_markdown_preview_action.setEnabled(False)
-            self.toggle_html_preview_action.setEnabled(False)
+            
+            # 如果不是HTML编辑器，禁用相关按钮
+            if not is_html_tab:
+                self.toggle_html_preview_action.setEnabled(False)
+                self.toggle_html_richtext_action.setEnabled(False)
+            
+            # 如果不是Markdown编辑器，禁用相关按钮
+            if not is_markdown_tab:
+                self.toggle_markdown_preview_action.setEnabled(False)
+            
             return
             
         # Enable/disable actions based on editor type or view type
@@ -559,7 +632,10 @@ class MainWindow(QMainWindow):
         if is_markdown_tab: self.toggle_markdown_preview_action.setChecked(current_tab_container.is_preview_mode)
         
         self.toggle_html_preview_action.setEnabled(is_html_tab)
-        if is_html_tab: self.toggle_html_preview_action.setChecked(current_tab_container.is_preview_mode)
+        self.toggle_html_richtext_action.setEnabled(is_html_tab)
+        if is_html_tab:
+            self.toggle_html_preview_action.setChecked(current_tab_container.current_mode == current_tab_container.PREVIEW_MODE)
+            self.toggle_html_richtext_action.setChecked(current_tab_container.current_mode == current_tab_container.RICH_TEXT_MODE)
 
 
     def update_window_title(self):

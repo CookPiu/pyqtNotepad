@@ -429,7 +429,9 @@ class MarkdownEditorWidget(QWidget):
                 self.is_preview_mode = False
                 mode_actually_changed = True
         
-        if mode_actually_changed: self.view_mode_changed.emit(self.is_preview_mode)
+        # 无论模式是否实际改变，都发出信号，确保UI状态与实际状态同步
+        # 这修复了在某些情况下UI状态与实际预览状态不同步的bug
+        self.view_mode_changed.emit(self.is_preview_mode)
 
     def load_markdown(self, file_path: str) -> bool:
         try:
