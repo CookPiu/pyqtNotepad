@@ -308,7 +308,30 @@ class MainWindow(QMainWindow):
             default_open_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
             if not default_open_dir or not os.path.isdir(default_open_dir):
                 default_open_dir = os.path.expanduser("~")
-        self.file_operations.open_file_dialog(initial_dir=default_open_dir)
+        
+        # Define file filters including new media types
+        file_types_list = [
+            "所有支持的文件 (*.txt *.md *.markdown *.html *.pdf *.docx *.xlsx *.pptx *.png *.jpg *.jpeg *.gif *.bmp *.webp *.mp4 *.avi *.mkv *.mov *.webm)",
+            "图片文件 (*.png *.jpg *.jpeg *.gif *.bmp *.webp)",
+            "视频文件 (*.mp4 *.avi *.mkv *.mov *.webm)",
+            "Office 文件 (*.docx *.xlsx *.pptx)",
+            "HTML 文件 (*.html)",
+            "Markdown 文件 (*.md *.markdown)",
+            "文本文件 (*.txt)",
+            "PDF 文件 (*.pdf)",
+            "所有文件 (*)"
+        ]
+        filters = ";;".join(file_types_list)
+
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, "打开文件", default_open_dir, filters
+        )
+        if file_name:
+            # The FileOperations class has its own open_file_from_path which is more direct
+            # and handles UI manager interactions.
+            # We call that directly instead of its open_file_dialog.
+            self.file_operations.open_file_from_path(file_name)
+
 
     def open_folder_wrapper(self):
         """Wrapper to open folder chooser and set as workspace."""
@@ -397,7 +420,15 @@ class MainWindow(QMainWindow):
         if isinstance(current_tab_container, _InternalTextEdit): 
              return current_tab_container
         
+        # Check for our new view types
+        # Assuming ImageViewWidget and VideoPlayerWidget are the direct widgets in tabs
+        # and don't have a sub-component to return like TextEditor._editor
+        module_path = current_tab_container.__class__.__module__
+        if 'image_viewer_view' in module_path or 'video_player_view' in module_path:
+            return current_tab_container
+
         return current_tab_container
+
 
     def on_current_tab_changed(self, index):
         current_editor_component = self.get_current_editor_widget()
@@ -435,8 +466,16 @@ class MainWindow(QMainWindow):
         if current_tab_container_widget: # Check if it's not None
             self.view_operations.handle_tab_change(current_tab_container_widget)
 
-        if self.ui_manager.is_widget_editor(current_editor_component): 
+        # Focus logic needs to be careful with non-editor widgets
+        if current_editor_component and hasattr(current_editor_component, 'setFocus') and \
+           self.ui_manager.is_widget_editor(current_editor_component): 
              current_editor_component.setFocus()
+        elif current_tab_container_widget and hasattr(current_tab_container_widget, 'setFocus'):
+            # For non-editor views like ImageViewWidget or VideoPlayerWidget, focus the container itself
+            module_path = current_tab_container_widget.__class__.__module__
+            if 'image_viewer_view' in module_path or 'video_player_view' in module_path:
+                 current_tab_container_widget.setFocus()
+
 
     def _update_copy_cut_state(self, available: bool):
         self.copy_action.setEnabled(available)
@@ -450,62 +489,78 @@ class MainWindow(QMainWindow):
             self.save_action, self.save_as_action, 
             self.translate_selection_action
         ]
-        # Preview toggles are handled separately based on tab container type
-        # self.close_tab_action is enabled if there's any tab
+        
+        current_tab_container = self.tab_widget.currentWidget() if self.tab_widget else None
+        is_known_editor = self.ui_manager.is_widget_editor(current_widget)
+        
+        # Determine if the current tab is one of our new view types
+        is_image_view = False
+        is_video_view = False
+        if current_tab_container:
+            module_path = current_tab_container.__class__.__module__
+            if 'image_viewer_view' in module_path:
+                is_image_view = True
+            elif 'video_player_view' in module_path:
+                is_video_view = True
 
-        if current_widget is None or not self.ui_manager.is_widget_editor(current_widget):
+        if not is_known_editor and not is_image_view and not is_video_view:
             for action in all_editor_actions:
                 action.setEnabled(False)
-            # Keep paste always enabled, close_tab enabled if tabs exist
+            # Check if clipboard has text using clipboard.text()
+            clipboard = QApplication.clipboard()
+            self.paste_action.setEnabled(bool(clipboard.text())) # Paste might still be possible
             self.close_tab_action.setEnabled(self.tab_widget.count() > 0 if self.tab_widget else False)
-            # Disable preview toggles if not an editor or no tab
             self.toggle_markdown_preview_action.setEnabled(False)
             self.toggle_html_preview_action.setEnabled(False)
             return
             
-        is_editor = True # We know it's an editor from the check above
-        is_writable = not current_widget.isReadOnly() if hasattr(current_widget, 'isReadOnly') else True
-
-        # Document-based actions
-        if hasattr(current_widget, 'document') and callable(current_widget.document):
-            doc = current_widget.document()
-            if doc:
-                self.undo_action.setEnabled(doc.isUndoAvailable())
-                self.redo_action.setEnabled(doc.isRedoAvailable())
-                self.save_action.setEnabled(doc.isModified() and is_writable)
+        # Enable/disable actions based on editor type or view type
+        if is_known_editor:
+            is_writable = not current_widget.isReadOnly() if hasattr(current_widget, 'isReadOnly') else True
+            if hasattr(current_widget, 'document') and callable(current_widget.document):
+                doc = current_widget.document()
+                if doc:
+                    self.undo_action.setEnabled(doc.isUndoAvailable())
+                    self.redo_action.setEnabled(doc.isRedoAvailable())
+                    self.save_action.setEnabled(doc.isModified() and is_writable)
+                else:
+                    self.undo_action.setEnabled(False); self.redo_action.setEnabled(False); self.save_action.setEnabled(False)
             else:
                 self.undo_action.setEnabled(False); self.redo_action.setEnabled(False); self.save_action.setEnabled(False)
-        else: # No document method (should not happen for known editors)
-            self.undo_action.setEnabled(False); self.redo_action.setEnabled(False); self.save_action.setEnabled(False)
             
-        has_selection = False
-        if hasattr(current_widget, 'textCursor') and callable(current_widget.textCursor):
-            cursor = current_widget.textCursor()
-            if cursor: has_selection = cursor.hasSelection()
-                
-        self._update_copy_cut_state(has_selection) # is_editor is true here
-        self.translate_selection_action.setEnabled(has_selection)
-        self.select_all_action.setEnabled(True) # Always possible for an editor
-        self.find_action.setEnabled(True); self.replace_action.setEnabled(True)
-        self.save_as_action.setEnabled(is_writable)
-        self.close_tab_action.setEnabled(True) 
-        self.font_action.setEnabled(True); self.color_action.setEnabled(True)
-        
-        # insert_image_action is for WYSIWYG HTML, disable for source editors
-        self.insert_image_action.setEnabled(False) 
+            has_selection = False
+            if hasattr(current_widget, 'textCursor') and callable(current_widget.textCursor):
+                cursor = current_widget.textCursor()
+                if cursor: has_selection = cursor.hasSelection()
+                    
+            self._update_copy_cut_state(has_selection)
+            self.translate_selection_action.setEnabled(has_selection)
+            self.select_all_action.setEnabled(True)
+            self.find_action.setEnabled(True); self.replace_action.setEnabled(True)
+            self.save_as_action.setEnabled(is_writable) # Save As for editors
+            self.font_action.setEnabled(True); self.color_action.setEnabled(True)
+            self.insert_image_action.setEnabled(False) # Typically for rich text, not plain/code editors
+        else: # For image/video views or other non-editor tabs
+            for action in [self.undo_action, self.redo_action, self.cut_action, self.copy_action, 
+                           self.select_all_action, self.font_action, self.color_action, 
+                           self.insert_image_action, self.find_action, self.replace_action,
+                            self.save_action, self.save_as_action, self.translate_selection_action]:
+                action.setEnabled(False)
 
-        # Update preview toggle states based on the container widget type
-        current_tab_container = self.tab_widget.currentWidget() if self.tab_widget else None
+        # Check if clipboard has text using clipboard.text() for enabling paste action
+        clipboard = QApplication.clipboard()
+        self.paste_action.setEnabled(bool(clipboard.text()) and is_known_editor) # Paste only for editors
+        self.close_tab_action.setEnabled(True) 
+        
         is_markdown_tab = isinstance(current_tab_container, MarkdownEditorWidget)
         is_html_tab = isinstance(current_tab_container, HtmlEditor)
 
         self.toggle_markdown_preview_action.setEnabled(is_markdown_tab)
-        if is_markdown_tab:
-            self.toggle_markdown_preview_action.setChecked(current_tab_container.is_preview_mode)
+        if is_markdown_tab: self.toggle_markdown_preview_action.setChecked(current_tab_container.is_preview_mode)
         
         self.toggle_html_preview_action.setEnabled(is_html_tab)
-        if is_html_tab:
-            self.toggle_html_preview_action.setChecked(current_tab_container.is_preview_mode)
+        if is_html_tab: self.toggle_html_preview_action.setChecked(current_tab_container.is_preview_mode)
+
 
     def update_window_title(self):
         title_prefix = "Pynote Refactored"
@@ -523,21 +578,25 @@ class MainWindow(QMainWindow):
         if index == -1: return
         
         current_tab_container = self.ui_manager.tab_widget.widget(index)
-        actual_editor_component = self.get_current_editor_widget()
+        actual_editor_component = self.get_current_editor_widget() # This now can return the view itself
 
         if modified is None:
+            # For editors, check document.isModified()
             if actual_editor_component and hasattr(actual_editor_component, 'document') and \
-               callable(actual_editor_component.document):
+               callable(actual_editor_component.document) and self.ui_manager.is_widget_editor(actual_editor_component):
                 doc = actual_editor_component.document()
                 modified = doc.isModified() if doc else False
             else:
+                # For non-editor views (like image/video), they are not "modified" in the text sense
                 modified = False 
 
         base_name = self.ui_manager.get_widget_base_name(current_tab_container)
-        if not base_name: base_name = f"标签 {index + 1}"
+        if not base_name: base_name = f"标签 {index + 1}" # Fallback
+        
         new_tab_text = f"{base_name}{'*' if modified else ''}"
         self.ui_manager.tab_widget.setTabText(index, new_tab_text)
         self.update_window_title()
+
 
     def closeEvent(self, event):
         if self.file_operations.close_all_tabs(): event.accept()

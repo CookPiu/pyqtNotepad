@@ -9,6 +9,8 @@ from ..atomic.editor.html_editor import HtmlEditor
 from ..atomic.markdown_editor_widget import MarkdownEditorWidget
 from ..views.pdf_viewer_view import PdfViewerView
 from ..views.office_viewer_view import OfficeViewerWidget
+from ..views.image_viewer_view import ImageViewWidget # Added
+from ..views.video_player_view import VideoPlayerWidget # Added
 
 
 class FileOperations:
@@ -196,8 +198,42 @@ class FileOperations:
                 QMessageBox.critical(self.main_window, "错误", "无法找到用于打开文件的目标标签页控件。")
                 return
 
+            # Define known file type extensions
+            image_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp']
+            video_extensions = ['.mp4', '.avi', '.mkv', '.mov', '.webm', '.flv', '.wmv']
+
             if ext.lower() == '.pdf':
                 self.ui_manager.open_pdf_preview(abs_file_path) 
+                return
+            
+            elif ext.lower() in image_extensions:
+                try:
+                    image_viewer = ImageViewWidget(self.main_window) # Pass parent
+                    if image_viewer.load_image(abs_file_path):
+                        index = target_tab_widget.addTab(image_viewer, file_base_name)
+                        target_tab_widget.setCurrentIndex(index)
+                        image_viewer.setFocus() # Or appropriate focus handling
+                        if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                            self.main_window.statusBar.showMessage(f"已打开图片: {file_path}")
+                    else:
+                        image_viewer.deleteLater() # Cleanup if loading failed
+                except Exception as e:
+                    QMessageBox.critical(self.main_window, "图片预览错误", f"预览图片文件 '{file_path}' 时发生意外错误:\n{str(e)}")
+                return
+
+            elif ext.lower() in video_extensions:
+                try:
+                    video_player = VideoPlayerWidget(self.main_window) # Pass parent
+                    if video_player.load_video(abs_file_path):
+                        index = target_tab_widget.addTab(video_player, file_base_name)
+                        target_tab_widget.setCurrentIndex(index)
+                        video_player.setFocus() # Or appropriate focus handling
+                        if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                            self.main_window.statusBar.showMessage(f"已打开视频: {file_path}")
+                    else:
+                        video_player.deleteLater() # Cleanup if loading failed
+                except Exception as e:
+                    QMessageBox.critical(self.main_window, "视频播放错误", f"播放视频文件 '{file_path}' 时发生意外错误:\n{str(e)}")
                 return
             
             elif ext.lower() in ['.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt']:
