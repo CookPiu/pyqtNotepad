@@ -18,6 +18,11 @@ from ..components.ui_manager import UIManager
 from ..atomic.editor.html_editor import HtmlEditor
 from ..atomic.markdown_editor_widget import MarkdownEditorWidget
 from ..atomic.editor.text_editor import TextEditor, _InternalTextEdit
+# PaginatedViewWidget is no longer used.
+# from ..composite.paginated_view_widget import PaginatedViewWidget 
+# from ..composite.editor_group_widget import EditorGroupWidget # Used by RootEditorAreaWidget
+from ..core.dockable_tab_widget import DockableTabWidget # Used by RootEditorAreaWidget
+from ..composite.root_editor_area_widget import RootEditorAreaWidget # Added
 
 
 class MainWindow(QMainWindow):
@@ -29,10 +34,19 @@ class MainWindow(QMainWindow):
         # print("▶ MainWindow.__init__ (Refactored)") # Keep for debug if needed
 
         self.ui_manager = UIManager(self)
-        self.markdown_editor_widget = MarkdownEditorWidget(self)
+        
         # Initialize current_workspace_path before FileOperations, as it might use it
         self.current_workspace_path = None 
-        self.file_operations = FileOperations(self, self.ui_manager, self.markdown_editor_widget)
+        
+        # self.tab_widget will be initialized by UIInitializer by getting it from RootEditorAreaWidget.
+        self.tab_widget: DockableTabWidget | None = None 
+        # self.editor_groups list is now managed by RootEditorAreaWidget.
+        # self.root_editor_area_splitter is also managed by RootEditorAreaWidget internally.
+        self.root_editor_area: RootEditorAreaWidget | None = None
+
+
+        # Pass self.ui_manager. UIManager will get tab_widget after UIInitializer sets it.
+        self.file_operations = FileOperations(self, self.ui_manager, None) 
         self.edit_operations = EditOperations(self, self.ui_manager)
         self.view_operations = ViewOperations(self, self.ui_manager)
 
@@ -41,18 +55,11 @@ class MainWindow(QMainWindow):
         self.zoom_step = 0.1
         self.min_zoom_factor = 0.5
         self.max_zoom_factor = 3.0
-
-        self.tab_widget = QTabWidget(self)
-        if self.tab_widget is None:
-             print("MainWindow: ERROR - QTabWidget creation returned None!")
-             self.ui_manager.tab_widget = None
-        else:
-             self.tab_widget.setDocumentMode(True)
-             self.tab_widget.setTabsClosable(True)
-             self.tab_widget.setMovable(True)
-             self.ui_manager.tab_widget = self.tab_widget
         
-        self.ui_initializer = UIInitializer(self, self.ui_manager, self.tab_widget)
+        # UIInitializer will now be responsible for creating the initial EditorGroupWidget
+        # and setting self.tab_widget to its internal DockableTabWidget.
+        # It no longer receives a pre-created tab_widget.
+        self.ui_initializer = UIInitializer(self, self.ui_manager)
         self.previous_editor = None # Store the container widget of the previous tab
         self.setDockOptions(QMainWindow.DockOption.AllowTabbedDocks | QMainWindow.DockOption.AnimatedDocks)
         
@@ -109,7 +116,8 @@ class MainWindow(QMainWindow):
                 lambda: self.update_edit_actions_state(self.get_current_editor_widget())
             )
         self.update_window_title()
-        self.setAcceptDrops(True) # Enable drag and drop for the main window
+        self.setAcceptDrops(True) # Still needed for general file drops, RootEditorAreaWidget handles tab drops for splitting.
+        # self._split_drop_indicator is now managed by RootEditorAreaWidget
 
     # def set_initial_workspace(self, path: str): # Removed as FileExplorer now defaults to Desktop
     #     """Sets the initial workspace path for the application."""
@@ -611,4 +619,34 @@ class MainWindow(QMainWindow):
                 return 
         
         # If the drop doesn't contain URLs or no valid files were found, ignore it.
-        event.ignore()
+        # Let RootEditorAreaWidget handle tab drops if it's the intended target.
+        # If the drop is for files, MainWindow handles it.
+        if not mime_data.hasFormat("application/x-qtabwidget-tabbar-tab"):
+            if mime_data.hasUrls():
+                files_to_open = []
+                for url in mime_data.urls():
+                    if url.isLocalFile():
+                        file_path = url.toLocalFile()
+                        if os.path.isfile(file_path):
+                            files_to_open.append(file_path)
+                
+                if files_to_open:
+                    event.acceptProposedAction()
+                    # Determine active editor group to open files into
+                    active_group = None
+                    if self.root_editor_area and hasattr(self.root_editor_area, 'get_active_editor_group'):
+                        active_group = self.root_editor_area.get_active_editor_group()
+                    
+                    target_tab_widget_for_files = active_group.get_tab_widget() if active_group else self.tab_widget
+
+                    for f_path in files_to_open:
+                        # FileOperations needs to know which tab widget to add to.
+                        # This requires FileOperations to be adapted or to get the target from UIManager.
+                        self.file_operations.open_file_from_path(f_path) # TODO: Adapt to target specific group
+                    return
+            event.ignore()
+        else:
+            # If it's a tab drop, but not handled by RootEditorAreaWidget (e.g. drop on main window itself, not a split zone)
+            # It should be ignored by MainWindow, allowing child (RootEditorAreaWidget) to handle it if it's over it.
+            # If RootEditorAreaWidget also ignores, then it's a no-op.
+            super().dropEvent(event) # Pass to children or default handling

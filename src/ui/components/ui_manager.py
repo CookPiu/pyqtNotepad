@@ -20,6 +20,7 @@ from ..atomic.editor.html_editor import HtmlEditor
 from ..atomic.markdown_editor_widget import MarkdownEditorWidget
 # Import ThemeManager if needed directly
 from ..core.theme_manager import ThemeManager
+from ..composite.editor_group_widget import EditorGroupWidget # Added
 
 # --- Worker for PDF to HTML conversion ---
 class PdfToHtmlWorkerForUIManager(QObject): # Worker is already a QObject
@@ -53,6 +54,7 @@ class UIManager(QObject): # Inherit from QObject
         self.registered_views = {} 
         self.view_instances = {} 
         self.view_docks = {} 
+        self.active_editor_group: EditorGroupWidget | None = None
         
         self.pdf_conversion_thread = None 
         self.pdf_conversion_worker = None 
@@ -61,7 +63,8 @@ class UIManager(QObject): # Inherit from QObject
         self.register_view(NoteDownloaderView, "NoteDownloader") 
         self.register_view(CalculatorWidget, "计算器")
         self.register_view(TimerWidget, "计时器")
-    
+        # self.tool_box_view_instances = {} # To keep track of instances specifically in the toolbox
+
     def apply_current_theme(self):
         """应用当前主题和缩放级别到UI组件"""
         base_style_sheet = self.theme_manager.get_current_style_sheet()
@@ -347,64 +350,142 @@ class UIManager(QObject): # Inherit from QObject
          self.registered_views[view_name] = {"class": view_class, "icon": icon_name}
          print(f"视图已注册: {view_name} (Class: {view_class.__name__})")
 
-    def open_view(self, view_name: str, open_in_dock: bool = False, bring_to_front: bool = True):
+    def open_view(self, view_name: str, open_in_dock: bool = False, open_in_tool_box: bool = False, bring_to_front: bool = True):
         if view_name not in self.registered_views:
             QMessageBox.warning(self.main_window, "视图未注册", f"视图 '{view_name}' 未找到或未注册。")
-            return
+            return None
 
         view_info = self.registered_views[view_name]
         view_class = view_info["class"]
-        icon = QIcon.fromTheme(view_info["icon"]) if view_info["icon"] else QIcon()
+        icon_name = view_info["icon"]
+        icon = QIcon.fromTheme(icon_name) if icon_name else QIcon()
 
-        if open_in_dock:
-            dock = self.view_docks.get(view_name)
-            if dock and dock.widget():
-                 if bring_to_front: dock.show(); dock.raise_()
-                 return dock.widget()
-            elif dock and not dock.widget():
-                 del self.view_docks[view_name] 
+        # Check if instance already exists (for toolbox or general view_instances)
+        # This logic might need refinement if a view can be in a dock AND toolbox simultaneously (not typical)
+        instance = self.view_instances.get(view_name)
+
+        if open_in_tool_box:
+            if not hasattr(self.main_window, 'tool_box_widget') or not self.main_window.tool_box_widget:
+                QMessageBox.critical(self.main_window, "错误", "底部工具箱未初始化。")
+                return None
+            
+            tool_box = self.main_window.tool_box_widget
+            # Check if already in toolbox
+            for i in range(tool_box.count()):
+                if tool_box.widget(i) == instance and instance is not None: # Check if the specific instance is there
+                    if bring_to_front: tool_box.setCurrentIndex(i)
+                    tool_box.show() # Ensure toolbox is visible
+                    instance.show() # Ensure the panel/widget itself is visible
+                    return instance
+            
+            # If not found or instance is None, create new
             try:
-                 instance = view_class(self.main_window)
+                if instance is None: 
+                    if view_name == "NoteDownloader" and hasattr(self.main_window, 'note_downloader_panel'):
+                        instance = self.main_window.note_downloader_panel
+                        # NoteDownloaderPanel might already be in view_instances if registered before UI init
+                        if view_name not in self.view_instances or self.view_instances[view_name] != instance:
+                             self.view_instances[view_name] = instance
+                    else:
+                        instance = view_class(self.main_window)
+                        self.view_instances[view_name] = instance
+                
+                # Ensure the instance (especially if it's a PanelWidget like NoteDownloader) is visible itself
+                if hasattr(instance, 'show') and callable(instance.show):
+                    instance.show()
+
+                index = tool_box.addTab(instance, icon, view_name) 
+                if bring_to_front: 
+                    tool_box.setCurrentIndex(index)
+                
+                if not tool_box.isVisible(): # Ensure toolbox itself is visible
+                    tool_box.show()
+                return instance
+            except Exception as e:
+                QMessageBox.critical(self.main_window, "打开工具错误", f"在工具箱中创建视图 '{view_name}' 时出错: {e}")
+                return None
+
+        elif open_in_dock: # Existing dock logic
+            dock = self.view_docks.get(view_name)
+            # If an instance exists but not in a dock, or if the dock's widget is different, recreate dock
+            if instance and (not dock or dock.widget() != instance):
+                if dock: # Remove old dock if its widget is wrong or gone
+                    dock.setWidget(None) # Detach widget
+                    dock.deleteLater()
+                    del self.view_docks[view_name]
+                dock = None # Force dock recreation
+
+            if dock and dock.widget() == instance and instance is not None:
+                 if bring_to_front: dock.show(); dock.raise_()
+                 return instance
+            # If dock is None but instance exists, or if dock's widget is None (already detached)
+            # Proceed to create/re-create the dock for the existing/new instance.
+
+            try:
+                 if instance is None: # Create instance if it truly doesn't exist
+                    instance = view_class(self.main_window)
+                    self.view_instances[view_name] = instance
+
                  dock = QDockWidget(view_name, self.main_window)
                  dock.setObjectName(f"{view_name}Dock")
                  dock.setWidget(instance)
                  dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-                 self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+                 self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock) # Default to right
                  self.view_docks[view_name] = dock
-                 self.view_instances[view_name] = instance
-                 for existing_dock in self.view_docks.values():
-                      if existing_dock != dock and self.main_window.dockWidgetArea(existing_dock) == self.main_window.dockWidgetArea(dock):
-                           self.main_window.tabifyDockWidget(existing_dock, dock)
-                           break
+                 
+                 # Attempt to tabify with other docks in the same area
+                 for existing_dock_name, existing_dock_obj in self.view_docks.items():
+                      if existing_dock_obj != dock and self.main_window.dockWidgetArea(existing_dock_obj) == self.main_window.dockWidgetArea(dock):
+                           self.main_window.tabifyDockWidget(existing_dock_obj, dock)
+                           break # Tabify with the first one found in the area
+                 
                  if bring_to_front: dock.show(); dock.raise_()
                  return instance
             except Exception as e:
-                 QMessageBox.critical(self.main_window, "打开视图错误", f"创建视图 '{view_name}' 时出错: {e}")
+                 QMessageBox.critical(self.main_window, "打开视图错误", f"创建停靠视图 '{view_name}' 时出错: {e}")
                  return None
-        else: # Tabbed view
-            # Ensure tab_widget is valid for tabbed view opening
-            current_tab_widget = self.tab_widget
-            if not current_tab_widget and hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget:
-                current_tab_widget = self.main_window.tab_widget
-                self.tab_widget = current_tab_widget
+        else: # Fallback to main editor tab area (though tools shouldn't typically open here)
+            # This part is less relevant now with RootEditorAreaWidget handling editor tabs.
+            # Tools should go to toolbox or docks.
+            # If a view is meant for the main editor area, FileOperations should handle it.
+            QMessageBox.information(self.main_window, "提示", f"视图 '{view_name}' 通常在工具箱或作为可停靠窗口打开。")
+            return None
 
-            if not current_tab_widget:
-                QMessageBox.critical(self.main_window, "错误", "标签页管理器未能用于打开视图。")
-                return None
+    def close_view_in_tool_box(self, view_name: str):
+        """Closes a view tab in the bottom toolbox."""
+        if not hasattr(self.main_window, 'tool_box_widget') or not self.main_window.tool_box_widget:
+            return
 
-            for i in range(current_tab_widget.count()):
-                 widget = current_tab_widget.widget(i)
-                 if isinstance(widget, view_class):
-                      if bring_to_front: current_tab_widget.setCurrentIndex(i)
-                      return widget
-            try:
-                 instance = view_class(self.main_window)
-                 index = current_tab_widget.addTab(instance, icon, view_name)
-                 if bring_to_front: current_tab_widget.setCurrentIndex(index)
-                 return instance
-            except Exception as e:
-                 QMessageBox.critical(self.main_window, "打开视图错误", f"创建视图 '{view_name}' 时出错: {e}")
-                 return None
+        tool_box = self.main_window.tool_box_widget
+        
+        # For NoteDownloader, the instance is self.main_window.note_downloader_panel
+        instance_to_find = None
+        if view_name == "NoteDownloader":
+            instance_to_find = getattr(self.main_window, 'note_downloader_panel', None)
+        else:
+            instance_to_find = self.view_instances.get(view_name)
+
+        if not instance_to_find:
+            return # Instance not found, nothing to close
+
+        for i in range(tool_box.count()):
+            widget_in_tab = tool_box.widget(i)
+            if widget_in_tab == instance_to_find:
+                tool_box.removeTab(i)
+                # We don't delete the instance from self.view_instances here,
+                # as it might be reused or managed elsewhere (e.g. NoteDownloaderPanel is persistent).
+                # If a tool is meant to be fully discarded, its instance should be deleted.
+                # For now, just remove from toolbox.
+                # If it's not NoteDownloader, we can consider removing from self.view_instances
+                # if these are meant to be transient when closed from toolbox.
+                if view_name != "NoteDownloader" and view_name in self.view_instances:
+                    # instance_to_find.deleteLater() # If it should be destroyed
+                    pass # Or just keep the instance in self.view_instances for reuse
+                break
+        
+        if tool_box.count() == 0 and tool_box.isVisible():
+             tool_box.hide() # Optionally hide toolbox if empty
+
 
     def is_widget_editor(self, widget: QWidget | None) -> bool:
         if widget is None: return False
@@ -417,8 +498,15 @@ class UIManager(QObject): # Inherit from QObject
          return isinstance(widget, HtmlEditor)
 
     def get_widget_base_name(self, widget: QWidget | None) -> str | None:
-         if not widget: return None
-         file_path = widget.property("file_path")
+         # This method might be called with either the editor widget or its container (e.g. EditorGroupWidget)
+         # It should ideally get properties from the actual editor content if widget is a container.
+         actual_content_widget = widget
+         if isinstance(widget, EditorGroupWidget): # Check if it's an EditorGroupWidget
+             actual_content_widget = widget.current_widget() # Get the current editor from the group
+         
+         if not actual_content_widget: return None
+         
+         file_path = actual_content_widget.property("file_path")
          if file_path: return os.path.basename(file_path)
          untitled_name = widget.property("untitled_name")
          if untitled_name: return untitled_name
@@ -426,36 +514,80 @@ class UIManager(QObject): # Inherit from QObject
          return widget.__class__.__name__
 
     def is_file_open(self, file_path: str) -> bool:
-        current_tab_widget = self.tab_widget
-        if not current_tab_widget and hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget:
-            current_tab_widget = self.main_window.tab_widget
-            self.tab_widget = current_tab_widget
-            
-        if not current_tab_widget: return False
         abs_file_path = os.path.abspath(file_path)
-        for i in range(current_tab_widget.count()):
-            widget = current_tab_widget.widget(i)
-            # This check needs to be more robust if tabs can contain non-editor widgets with file_path
-            editor_path = widget.property("file_path") # Assuming only editor tabs have 'file_path'
-            if editor_path and os.path.abspath(editor_path) == abs_file_path:
-                return True
+        if hasattr(self.main_window, 'root_editor_area') and self.main_window.root_editor_area:
+            for group in self.main_window.root_editor_area.editor_groups:
+                tab_widget = group.get_tab_widget()
+                for i in range(tab_widget.count()):
+                    widget_in_tab = tab_widget.widget(i) # This is the editor/viewer itself
+                    editor_path = widget_in_tab.property("file_path")
+                    if editor_path and os.path.abspath(editor_path) == abs_file_path:
+                        return True
+        # Fallback for safety, though root_editor_area should always exist after init
+        elif self.tab_widget: # Check the UIManager's current tab_widget (active group's)
+            for i in range(self.tab_widget.count()):
+                widget = self.tab_widget.widget(i)
+                editor_path = widget.property("file_path")
+                if editor_path and os.path.abspath(editor_path) == abs_file_path:
+                    return True
         return False
 
     def focus_tab_by_filepath(self, file_path: str):
-        current_tab_widget = self.tab_widget
-        if not current_tab_widget and hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget:
-            current_tab_widget = self.main_window.tab_widget
-            self.tab_widget = current_tab_widget
-
-        if not current_tab_widget: return
         abs_file_path = os.path.abspath(file_path)
-        for i in range(current_tab_widget.count()):
-            widget = current_tab_widget.widget(i)
-            editor_path = widget.property("file_path")
-            if editor_path and os.path.abspath(editor_path) == abs_file_path:
-                current_tab_widget.setCurrentIndex(i)
-                break
+        if hasattr(self.main_window, 'root_editor_area') and self.main_window.root_editor_area:
+            for group in self.main_window.root_editor_area.editor_groups:
+                tab_widget = group.get_tab_widget()
+                for i in range(tab_widget.count()):
+                    widget_in_tab = tab_widget.widget(i)
+                    editor_path = widget_in_tab.property("file_path")
+                    if editor_path and os.path.abspath(editor_path) == abs_file_path:
+                        # Make this group active and set its tab current
+                        self.set_active_editor_group(group) # This will update self.tab_widget
+                        group.get_tab_widget().setCurrentIndex(i)
+                        # Ensure the main window layout gives focus if necessary
+                        if hasattr(self.main_window, 'root_editor_area'):
+                           self.main_window.root_editor_area.activateWindow() # or specific group.setFocus()
+                        widget_in_tab.setFocus()
+                        return
+        # Fallback
+        elif self.tab_widget:
+             for i in range(self.tab_widget.count()):
+                widget = self.tab_widget.widget(i)
+                editor_path = widget.property("file_path")
+                if editor_path and os.path.abspath(editor_path) == abs_file_path:
+                    self.tab_widget.setCurrentIndex(i)
+                    widget.setFocus()
+                    break
                     
     def register_speech_recognition(self):
         """注册语音识别组件"""
         self.register_view(SpeechRecognitionWidget, "SpeechRecognition", "microphone")
+
+    def set_active_editor_group(self, group: EditorGroupWidget | None):
+        """Sets the currently active editor group."""
+        # print(f"UIManager: Active editor group set to: {id(group) if group else 'None'}")
+        self.active_editor_group = group
+        if group: # Update the main tab_widget reference if a group becomes active
+            self.tab_widget = group.get_tab_widget()
+            # If MainWindow's tab_widget also needs update (it should if it's the primary one)
+            if hasattr(self.main_window, 'tab_widget'):
+                self.main_window.tab_widget = self.tab_widget
+        # If group is None, what should self.tab_widget be? 
+        # Perhaps the first group's tab_widget or None if no groups.
+        # This logic might need refinement based on how empty splitters are handled.
+
+    def get_active_editor_group(self) -> EditorGroupWidget | None:
+        """Gets the currently active editor group."""
+        # A more robust way might involve checking focus across all editor groups
+        # or having RootEditorAreaWidget manage and report the active one.
+        if self.active_editor_group and self.active_editor_group.isVisible() and self.active_editor_group.count() > 0:
+            return self.active_editor_group
+        
+        # Fallback: if no active_editor_group is set, or it's invalid, try to find one
+        if hasattr(self.main_window, 'root_editor_area') and self.main_window.root_editor_area:
+            active_group_from_root = self.main_window.root_editor_area.get_active_editor_group()
+            if active_group_from_root:
+                self.set_active_editor_group(active_group_from_root) # Update internal state
+                return active_group_from_root
+        
+        return None # No active group found

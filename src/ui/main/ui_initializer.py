@@ -5,7 +5,7 @@ import inspect
 from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolBar, QMenuBar, QMenu,
                              QStatusBar, QSplitter, QTabWidget, QToolButton, QListWidget,
-                             QListWidgetItem, QSizePolicy, QDockWidget, QMainWindow) # Added QMainWindow
+                             QListWidgetItem, QSizePolicy, QDockWidget, QMainWindow, QApplication) # Added QApplication
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtCore import Qt, QSize, QUrl
 
@@ -18,6 +18,10 @@ from ..core.base_dialog import BaseDialog # Needed for type checking
 from ..atomic.file_explorer import FileExplorer
 from ..views.note_downloader_view import NoteDownloaderView
 from ..core.panel_widget import PanelWidget # Added import
+# EditorGroupWidget and DockableTabWidget will be used by RootEditorAreaWidget
+# from ..composite.editor_group_widget import EditorGroupWidget 
+# from ..core.dockable_tab_widget import DockableTabWidget
+from ..composite.root_editor_area_widget import RootEditorAreaWidget # Added
 
 # Conditional import for QWebEngineView
 try:
@@ -31,14 +35,10 @@ except ImportError:
 class UIInitializer:
     """负责初始化 MainWindow 的核心 UI 结构和动态视图注册"""
 
-    def __init__(self, main_window: QMainWindow, ui_manager: UIManager, tab_widget: QTabWidget | None): # Receive tab_widget
+    def __init__(self, main_window: QMainWindow, ui_manager: UIManager): # tab_widget no longer passed
         self.main_window = main_window
         self.ui_manager = ui_manager # UIManager is now passed in
-        self.tab_widget = tab_widget # Store the tab_widget passed from MainWindow
-        if self.tab_widget is not None: # Explicitly check for None
-            print(f"DEBUG:UI_INIT.__init__: Received tab_widget.isVisible(): {self.tab_widget.isVisible()}, count: {self.tab_widget.count()}")
-        else:
-            print("DEBUG:UI_INIT.__init__: Received tab_widget is None. (Checked with 'is None')")
+        # self.tab_widget is no longer stored here directly from constructor
         self.main_window.file_explorer = None
         self.main_window.note_downloader_view_content = None # Stores the actual NoteDownloaderView instance
         self.main_window.note_downloader_panel = None # Stores the PanelWidget wrapper for NoteDownloader
@@ -72,6 +72,10 @@ class UIInitializer:
 
         # --- Connect Signals Handled by MainWindow ---
         # Connection moved to MainWindow.__init__ after UIManager creates tab_widget
+        
+        print("DEBUG: UIInitializer - Attempting to process events before setup_ui completes.")
+        QApplication.processEvents()
+        print("DEBUG: UIInitializer - Events processed.")
 
         print("▶ UIInitializer.setup_ui 完成")
 
@@ -106,81 +110,129 @@ class UIInitializer:
         self.main_window.note_downloader_panel.hide() # Ensure initially hidden
 
     def _setup_main_layout(self, parent_layout: QVBoxLayout):
-        """设置主内容区域的分割器布局 (FileExplorer | TabWidget | NoteDownloaderView)"""
-        if self.tab_widget is None:
-            print("CRITICAL ERROR in _setup_main_layout: self.tab_widget is None. Editor area cannot be created.")
-            error_label = QLabel(
-                "关键错误：编辑器区域 (TabWidget) 未能正确初始化。\n"
-                "请检查 MainWindow.py 中 tab_widget 的创建和传递过程。",
-                # parent=self.main_window.centralWidget() # Parent will be set when added to layout
-            )
-            error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            error_label.setStyleSheet("QLabel { color: red; font-size: 16px; padding: 20px; background-color: #ffe0e0; border: 1px solid red; }")
-            
-            # Clear existing items from parent_layout and add the error label
-            while parent_layout.count():
-                item = parent_layout.takeAt(0)
-                if item.widget():
-                    item.widget().setParent(None) # Ensure old widgets are properly reparented or deleted
-            parent_layout.addWidget(error_label)
-            return # Stop further layout setup
+        """设置主内容区域的分割器布局 (FileExplorer | RootEditorAreaWidget | NoteDownloaderView)"""
+        
+        # Create the RootEditorAreaWidget which will manage editor groups and splits
+        self.main_window.root_editor_area = RootEditorAreaWidget(self.main_window)
+        self.main_window.root_editor_area.setObjectName("RootEditorArea")
+
+        # --- BEGIN IMMEDIATE CHECK OF root_editor_area ---
+        print(f"DEBUG: UIInitializer - Created root_editor_area: {self.main_window.root_editor_area}, type: {type(self.main_window.root_editor_area)}, id: {id(self.main_window.root_editor_area) if self.main_window.root_editor_area else 'N/A'}")
+        try:
+            if self.main_window.root_editor_area:
+                rea_obj_name = self.main_window.root_editor_area.objectName()
+                print(f"DEBUG: UIInitializer - root_editor_area.objectName() is '{rea_obj_name}'. RootEditorAreaWidget seems valid after creation.")
+                if not self.main_window.root_editor_area.parent(): # Check if it has a parent
+                    print(f"WARNING DEBUG: UIInitializer - root_editor_area.parent() is None immediately after creation with parent {self.main_window}")
+                else:
+                    print(f"DEBUG: UIInitializer - root_editor_area.parent() is {self.main_window.root_editor_area.parent()}")
+
+            else:
+                print(f"CRITICAL DEBUG: UIInitializer - self.main_window.root_editor_area is None or evaluates to False IMMEDIATELY after creation.")
+        except RuntimeError as e_rea:
+            print(f"CRITICAL DEBUG: UIInitializer - RuntimeError when accessing root_editor_area IMMEDIATELY after creation: {e_rea}")
+        except Exception as e_rea_other:
+            print(f"CRITICAL DEBUG: UIInitializer - Unexpected error with root_editor_area IMMEDIATELY after creation: {e_rea_other}")
+        # --- END IMMEDIATE CHECK OF root_editor_area ---
+        
+        # Set MainWindow's and UIManager's tab_widget to the DockableTabWidget 
+        # from the initial group within RootEditorAreaWidget.
+        initial_tab_widget = self.main_window.root_editor_area.get_initial_tab_widget()
+        print(f"DEBUG: UIInitializer - Received initial_tab_widget: {initial_tab_widget}, type: {type(initial_tab_widget)}, id: {id(initial_tab_widget) if initial_tab_widget else 'N/A'}")
+        
+        is_cpp_deleted_for_log = False # For logging purposes
+        if initial_tab_widget is not None: # Ensure Python object exists before checking sip
+            try:
+                from PyQt6 import sip
+                is_cpp_deleted_for_log = sip.isdeleted(initial_tab_widget)
+                print(f"DEBUG: UIInitializer - sip.isdeleted(initial_tab_widget) is {is_cpp_deleted_for_log} (for logging)")
+            except ImportError:
+                print("WARNING DEBUG: UIInitializer - Could not import sip to check isdeleted().")
+            except Exception as e_sip:
+                print(f"WARNING DEBUG: UIInitializer - Error checking sip.isdeleted(): {e_sip}")
+        
+        # --- New logic: Assign if Python object exists, log warning if boolean context is False, but proceed ---
+        if initial_tab_widget is not None: # Check if the Python object itself is None
+            self.main_window.tab_widget = initial_tab_widget
+            if self.ui_manager:
+                self.ui_manager.tab_widget = self.main_window.tab_widget
+                # print(f"DEBUG: UIInitializer - Assigned initial_tab_widget (id: {id(initial_tab_widget)}) to main_window.tab_widget and ui_manager.tab_widget")
+            else:
+                # This is a separate critical issue if ui_manager is None and needs tab_widget.
+                print("CRITICAL WARNING in _setup_main_layout: self.ui_manager is None. Cannot assign its tab_widget. Layout continues.")
+                # Note: If ui_manager being None is fatal for later stages, this might need a return,
+                # but for now, we prioritize completing the layout to fix the current specific error.
+
+            # Log a warning if the widget evaluates to False in boolean context, but proceed.
+            if not initial_tab_widget: # This is the problematic boolean check we've been observing
+                 print(f"WARNING in _setup_main_layout: initial_tab_widget (Python obj: {initial_tab_widget}, "
+                       f"sip.isdeleted: {is_cpp_deleted_for_log}) evaluates to False in boolean context. "
+                       f"Layout will proceed. Tab functionality might be affected later if it's truly unusable.")
+            else:
+                # This is the expected "good" path if the boolean context is also True.
+                print(f"DEBUG: UIInitializer - initial_tab_widget (Python obj: {initial_tab_widget}, "
+                      f"sip.isdeleted: {is_cpp_deleted_for_log}) evaluates to True. Proceeding normally with assignments.")
+
+        else: # initial_tab_widget (Python object) is None from get_initial_tab_widget()
+            print("CRITICAL ERROR in _setup_main_layout: get_initial_tab_widget() returned Python None. "
+                  "self.main_window.tab_widget will be None. Tab functionality will be broken. "
+                  "Proceeding with layout to allow full UI structure attempt.")
+            # self.main_window.tab_widget remains None or its previous value (if any)
+            # No 'return' here, to allow the rest of the layout to be built.
+
+        # The function no longer returns prematurely based on initial_tab_widget's boolean state.
+        # The rest of the layout setup will now always attempt to execute.
 
         if self.main_window.file_explorer is None:
             print("错误: UIInitializer 未能创建 file_explorer，无法设置主布局!")
-            # Potentially, we could still set up a layout with just tab_widget and note_downloader_panel
-            # For now, let's assume file_explorer is also critical for the intended splitter layout.
             return
         if self.main_window.note_downloader_panel is None: 
             print("错误: UIInitializer 未能创建 note_downloader_panel，无法设置主布局!")
             return
 
-        # Center-Right Splitter (TabWidget | NoteDownloaderPanel)
-        center_right_splitter = QSplitter(Qt.Orientation.Horizontal)
-        center_right_splitter.setObjectName("CenterRightSplitter")
-        center_right_splitter.setHandleWidth(2) # 宽度可以在 QSS 中设置，但这里保留以便更容易调整
-        # center_right_splitter.setStyleSheet("QSplitter::handle { background-color: lightgray; border: 1px solid darkgray; } QSplitter::handle:hover { background-color: gray; }") # 交给全局QSS控制
-        center_right_splitter.setChildrenCollapsible(False)
+        # Main Content Splitter (FileExplorer | RootEditorAreaWidget)
+        # NoteDownloaderPanel is no longer part of this initial layout, will be added to toolbox.
+        main_content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_content_splitter.setObjectName("MainContentSplitter")
+        main_content_splitter.setHandleWidth(2)
+        main_content_splitter.setChildrenCollapsible(False)
 
-        if self.tab_widget is not None: # Explicitly check for None
-            print(f"DEBUG:MAIN_LAYOUT: TabWidget initial: isVisible={self.tab_widget.isVisible()}, count={self.tab_widget.count()}, size={self.tab_widget.size()}, minSize={self.tab_widget.minimumSize()}, sizeHint={self.tab_widget.sizeHint()}")
-            print(f"DEBUG:MAIN_LAYOUT: TabWidget parent: {self.tab_widget.parentWidget()}")
-            print(f"DEBUG:MAIN_LAYOUT: TabWidget sizePolicy: H={self.tab_widget.sizePolicy().horizontalPolicy().name}, V={self.tab_widget.sizePolicy().verticalPolicy().name}")
-            
-            self.tab_widget.setMinimumSize(200, 150) 
-            self.tab_widget.setVisible(True) 
-            self.tab_widget.ensurePolished() 
-            print(f"DEBUG:MAIN_LAYOUT: TabWidget after setVisible(True): isVisible={self.tab_widget.isVisible()}")
-        else:
-            print("DEBUG:MAIN_LAYOUT: self.tab_widget is None before adding to CSR-Splitter!")
-            
-        center_right_splitter.addWidget(self.tab_widget)
-        center_right_splitter.addWidget(self.main_window.note_downloader_panel) 
+        self.main_window.root_editor_area.setMinimumSize(200, 150)
+        main_content_splitter.addWidget(self.main_window.file_explorer)
+        main_content_splitter.addWidget(self.main_window.root_editor_area) # RootEditorAreaWidget directly here
         
-        print(f"DEBUG:MAIN_LAYOUT: TabWidget in CSR-Splitter final visible: {self.tab_widget.isVisible() if self.tab_widget else 'N/A'}")
-        print(f"DEBUG:MAIN_LAYOUT: NoteDownloaderPanel in CSR-Splitter visible: {self.main_window.note_downloader_panel.isVisible()}")
+        main_content_splitter.setStretchFactor(0, 0) # File explorer less stretch
+        main_content_splitter.setStretchFactor(1, 1) # Editor area takes more space
+        main_content_splitter.setSizes([200, 800]) # Adjust initial sizes
         
-        center_right_splitter.setStretchFactor(0, 1) 
-        center_right_splitter.setStretchFactor(1, 1) 
-        center_right_splitter.setSizes([700, 300]) 
-        
-        print(f"DEBUG:MAIN_LAYOUT: CSR-Splitter count: {center_right_splitter.count()}, sizes: {center_right_splitter.sizes()}, handleWidth: {center_right_splitter.handleWidth()}")
-        self.main_window.center_right_splitter_ref = center_right_splitter
+        # Create the bottom toolbox tab widget
+        self.main_window.tool_box_widget = QTabWidget()
+        self.main_window.tool_box_widget.setObjectName("BottomToolboxWidget")
+        self.main_window.tool_box_widget.setMinimumHeight(150) # Initial height for toolbox
+        self.main_window.tool_box_widget.setMaximumHeight(400) # Max height for toolbox
+        # self.main_window.tool_box_widget.hide() # Initially hidden, shown when a tool is opened
 
-        # Main Splitter (FileExplorer | center_right_splitter)
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_splitter.setObjectName("MainSplitter")
-        main_splitter.setHandleWidth(2) # 宽度可以在 QSS 中设置，但这里保留以便更容易调整
-        # main_splitter.setStyleSheet("QSplitter::handle { background-color: lightgray; border: 1px solid darkgray; } QSplitter::handle:hover { background-color: gray; }") # 交给全局QSS控制
-        main_splitter.setChildrenCollapsible(False)
-        main_splitter.addWidget(self.main_window.file_explorer)
-        main_splitter.addWidget(center_right_splitter)
-        main_splitter.setStretchFactor(0, 0) 
-        main_splitter.setStretchFactor(1, 1) 
-        main_splitter.setSizes([200, 800]) 
+        # Main vertical splitter: Top (main_content_splitter) / Bottom (tool_box_widget)
+        app_level_splitter = QSplitter(Qt.Orientation.Vertical)
+        app_level_splitter.setObjectName("AppLevelSplitter")
+        app_level_splitter.setHandleWidth(2)
+        app_level_splitter.setChildrenCollapsible(False)
 
-        parent_layout.addWidget(main_splitter)
-        print(f"DEBUG:MAIN_LAYOUT: MainSplitter count: {main_splitter.count()}, sizes: {main_splitter.sizes()}, handleWidth: {main_splitter.handleWidth()}")
-        print("UIInitializer: Setup main layout with QSplitters.")
+        app_level_splitter.addWidget(main_content_splitter)
+        app_level_splitter.addWidget(self.main_window.tool_box_widget)
+        
+        app_level_splitter.setStretchFactor(0, 1) # Main content area takes more space
+        app_level_splitter.setStretchFactor(1, 0) # Toolbox less initial stretch
+        app_level_splitter.setSizes([600, 150]) # Initial sizes
+
+        parent_layout.addWidget(app_level_splitter)
+
+        # NoteDownloaderPanel is no longer part of the initial main layout.
+        # It will be added to the tool_box_widget when its activity bar button is clicked.
+        # The self.main_window.note_downloader_panel instance is created in _create_core_views
+        # and can be reused by the handle_activity_button_click logic.
+
+        print("UIInitializer: Setup main layout with RootEditorAreaWidget, QSplitters, and bottom ToolBox.")
 
     def _setup_activity_bar(self): # Renamed from _setup_activity_bar_dock
          """设置左侧活动栏 ToolBar"""
@@ -304,40 +356,51 @@ class UIInitializer:
         # and the button state needs to be synced.
         
         # First, ensure UIManager opens/focuses the view.
-        # open_view with open_in_dock=True should handle showing and raising the dock.
-        view_instance = self.ui_manager.open_view(view_name, open_in_dock=True)
+        # Now, open_view should add to the toolbox if it's a tool, not a dock.
+        # UIManager.open_view needs to be adapted or we handle it here.
+        # For now, let's assume UIManager.open_view will be modified.
+        # If button is checked, open/show in toolbox. If unchecked, hide/remove from toolbox.
 
-        if view_instance:
-            # If view is successfully opened/focused, ensure button is checked.
-            # If the button was already checked (meaning user clicked to potentially hide),
-            # UIManager.open_view would have just raised it. We might want to hide it instead.
-            # This requires more complex state management of docks.
-            # For now, clicking always tries to show/focus, and button reflects this attempt.
+        if button.isChecked():
+            # Special handling for NoteDownloader as its panel is pre-created
+            if view_name == "NoteDownloader" and self.main_window.note_downloader_panel:
+                # Check if already in toolbox
+                found = False
+                for i in range(self.main_window.tool_box_widget.count()):
+                    if self.main_window.tool_box_widget.widget(i) == self.main_window.note_downloader_panel:
+                        self.main_window.tool_box_widget.setCurrentIndex(i)
+                        found = True
+                        break
+                if not found:
+                    self.main_window.tool_box_widget.addTab(self.main_window.note_downloader_panel, "笔记下载器")
+                    self.main_window.tool_box_widget.setCurrentWidget(self.main_window.note_downloader_panel)
+                self.main_window.note_downloader_panel.show() # Show the panel content
+                self.main_window.tool_box_widget.show() # Ensure toolbox is visible
+            else:
+                # For other views, use UIManager to open them, assuming UIManager will handle adding to toolbox
+                view_instance = self.ui_manager.open_view(view_name, open_in_tool_box=True) # New flag
+                if not view_instance:
+                    button.setChecked(False) # Failed to open
             
-            # Uncheck all other view buttons in the activity bar
+            # Uncheck other tool buttons
             if hasattr(self.main_window, 'activity_view_buttons'):
-                for v_name, btn in self.main_window.activity_view_buttons.items():
+                 for v_name, btn in self.main_window.activity_view_buttons.items():
                     if btn != button:
                         btn.setChecked(False)
-            button.setChecked(True) # Check the clicked button
+        else: # Button was unchecked by user click
+            # Hide/remove the tool from toolbox
+            if view_name == "NoteDownloader" and self.main_window.note_downloader_panel:
+                for i in range(self.main_window.tool_box_widget.count()):
+                    if self.main_window.tool_box_widget.widget(i) == self.main_window.note_downloader_panel:
+                        self.main_window.tool_box_widget.removeTab(i)
+                        # self.main_window.note_downloader_panel.hide() # Panel itself might not need hide if tab is removed
+                        break
+            else:
+                self.ui_manager.close_view_in_tool_box(view_name) # New UIManager method
 
-            # If the view has a corresponding dock, connect its visibilityChanged signal
-            # to update the button's checked state.
-            dock = self.ui_manager.view_docks.get(view_name)
-            if dock:
-                # Disconnect previous connections for this button to avoid multiple triggers
-                try:
-                    dock.visibilityChanged.disconnect() 
-                except TypeError: # No connections to disconnect
-                    pass
-                # Connect to lambda that captures the correct button instance
-                dock.visibilityChanged.connect(lambda visible, b=button: b.setChecked(visible))
-                # Sync button state immediately
-                button.setChecked(dock.isVisible())
-
-        else:
-            # If open_view failed, uncheck the button
-            button.setChecked(False)
+            # If toolbox becomes empty, hide it (optional)
+            # if self.main_window.tool_box_widget.count() == 0:
+            #     self.main_window.tool_box_widget.hide()
 
 
     def _toggle_file_explorer_visibility(self, checked):
@@ -347,23 +410,24 @@ class UIInitializer:
              # Optionally, adjust splitter sizes when hiding/showing to reclaim space
              # This can be complex; QSplitter usually handles this if children are collapsible (False here)
 
-    def _toggle_note_downloader_panel_visibility(self, checked): # Renamed slot
-         """Toggles visibility of NoteDownloaderPanel in the QSplitter."""
+    def _toggle_note_downloader_panel_visibility(self, checked): # This method is now effectively replaced by handle_activity_button_click
+         """DEPRECATED: Toggles visibility of NoteDownloaderPanel. Use activity bar button."""
+         # This logic is now part of handle_activity_button_click for "NoteDownloader"
          if self.main_window.note_downloader_panel:
-             self.main_window.note_downloader_panel.setVisible(checked)
-             if checked:
-                 print(f"DEBUG:TOGGLE: NoteDownloaderPanel setVisible(True)")
-                 print(f"DEBUG:TOGGLE: NoteDownloaderPanel.isVisible(): {self.main_window.note_downloader_panel.isVisible()}")
-                 print(f"DEBUG:TOGGLE: NoteDownloaderPanel.size(): {self.main_window.note_downloader_panel.size()}")
-                 print(f"DEBUG:TOGGLE: NoteDownloaderPanel.sizeHint(): {self.main_window.note_downloader_panel.sizeHint()}")
-                 if hasattr(self.main_window, 'center_right_splitter_ref'):
-                     # Force a refresh of splitter layout if possible, or check sizes
-                     # QSplitter should update automatically when a child's visibility changes.
-                     # Forcing sizes might be an option if it doesn't.
-                     # Example: self.main_window.center_right_splitter_ref.setSizes(self.main_window.center_right_splitter_ref.sizes())
-                     print(f"DEBUG:TOGGLE: CSR-Splitter sizes after toggle: {self.main_window.center_right_splitter_ref.sizes()}")
-             else:
-                 print(f"DEBUG:TOGGLE: NoteDownloaderPanel setVisible(False)")
+             button = self.main_window.activity_view_buttons.get("NoteDownloader")
+             if button:
+                 button.setChecked(checked) # Sync button state
+                 self.handle_activity_button_click("NoteDownloader", button) # Trigger the new logic
+             else: # Fallback if button not found (should not happen)
+                if checked:
+                    self.main_window.tool_box_widget.addTab(self.main_window.note_downloader_panel, "笔记下载器")
+                    self.main_window.tool_box_widget.setCurrentWidget(self.main_window.note_downloader_panel)
+                    self.main_window.tool_box_widget.show()
+                else:
+                    for i in range(self.main_window.tool_box_widget.count()):
+                        if self.main_window.tool_box_widget.widget(i) == self.main_window.note_downloader_panel:
+                            self.main_window.tool_box_widget.removeTab(i)
+                            break
 
 
     # _setup_sidebar_dock is removed as FileExplorer is now part of QSplitter in _setup_main_layout
