@@ -163,8 +163,19 @@
 
     // 与PyQt通信的接口
     window.setHtmlContent = function (html) {
-      editor.setHtml(html)
-      document.getElementById('html-output').value = html
+      console.log('[editor.html] window.setHtmlContent called. HTML (first 200 chars):', html.substring(0, 200));
+      try {
+        editor.setHtml(html);
+        console.log('[editor.html] editor.setHtml(html) executed.');
+        // 尝试在设置内容后让编辑器获得焦点，看是否有助于刷新/渲染
+        if (editor && typeof editor.focus === 'function') {
+          editor.focus();
+          console.log('[editor.html] editor.focus() called.');
+        }
+      } catch (e) {
+        console.error('[editor.html] Error in editor.setHtml() or editor.focus():', e);
+      }
+      document.getElementById('html-output').value = html; // For debugging or hidden transfer
     }
 
     window.getHtmlContent = function () {

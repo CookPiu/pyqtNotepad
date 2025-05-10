@@ -15,9 +15,11 @@ from ..components.edit_operations import EditOperations
 from ..components.view_operations import ViewOperations
 from ..components.ui_manager import UIManager
 
-from ..atomic.editor.html_editor import HtmlEditor
+# from ..atomic.editor.html_editor import HtmlEditor # No longer primary HTML editor
+from ..atomic.editor.wang_editor import WangEditor # Import WangEditor
 from ..atomic.markdown_editor_widget import MarkdownEditorWidget
 from ..atomic.editor.text_editor import TextEditor, _InternalTextEdit
+from ..views.editable_html_preview_widget import EditableHtmlPreviewWidget # Added
 # PaginatedViewWidget is no longer used.
 # from ..composite.paginated_view_widget import PaginatedViewWidget 
 # from ..composite.editor_group_widget import EditorGroupWidget # Used by RootEditorAreaWidget
@@ -35,17 +37,11 @@ class MainWindow(QMainWindow):
 
         self.ui_manager = UIManager(self)
         
-        # Initialize current_workspace_path before FileOperations, as it might use it
         self.current_workspace_path = None 
         
-        # self.tab_widget will be initialized by UIInitializer by getting it from RootEditorAreaWidget.
         self.tab_widget: DockableTabWidget | None = None 
-        # self.editor_groups list is now managed by RootEditorAreaWidget.
-        # self.root_editor_area_splitter is also managed by RootEditorAreaWidget internally.
         self.root_editor_area: RootEditorAreaWidget | None = None
 
-
-        # Pass self.ui_manager. UIManager will get tab_widget after UIInitializer sets it.
         self.file_operations = FileOperations(self, self.ui_manager, None) 
         self.edit_operations = EditOperations(self, self.ui_manager)
         self.view_operations = ViewOperations(self, self.ui_manager)
@@ -56,28 +52,19 @@ class MainWindow(QMainWindow):
         self.min_zoom_factor = 0.5
         self.max_zoom_factor = 3.0
         
-        # UIInitializer will now be responsible for creating the initial EditorGroupWidget
-        # and setting self.tab_widget to its internal DockableTabWidget.
-        # It no longer receives a pre-created tab_widget.
         self.ui_initializer = UIInitializer(self, self.ui_manager)
-        self.previous_editor = None # Store the container widget of the previous tab
+        self.previous_editor = None 
         self.setDockOptions(QMainWindow.DockOption.AllowTabbedDocks | QMainWindow.DockOption.AnimatedDocks)
         
         self.create_actions()
-        self.ui_initializer.setup_ui() # This creates self.toolbar and self.file_explorer
+        self.ui_initializer.setup_ui() 
         
-        # Connect signals for FileExplorer after it's created by UIInitializer
         if hasattr(self, 'file_explorer') and self.file_explorer:
             self.file_explorer.root_path_changed.connect(self.on_workspace_changed)
             self.file_explorer.file_double_clicked.connect(self.handle_file_explorer_double_click)
             
-            # Manually trigger on_workspace_changed with the initial path from FileExplorer
-            # This ensures current_workspace_path is set correctly at startup
-            # and also handles showing the FileExplorer if it was hidden and a valid path is set.
             initial_fe_path = self.file_explorer.get_root_path()
             if initial_fe_path and os.path.isdir(initial_fe_path):
-                # Call on_workspace_changed to ensure all related states are updated
-                # This will set self.current_workspace_path and show file explorer if needed.
                 self.on_workspace_changed(initial_fe_path) 
             else:
                 print(f"MainWindow: FileExplorer initial path ('{initial_fe_path}') is not a valid directory.")
@@ -92,22 +79,11 @@ class MainWindow(QMainWindow):
         if self.tab_widget is not None:
              self.tab_widget.tabCloseRequested.connect(self.file_operations.close_tab)
              self.tab_widget.currentChanged.connect(self.on_current_tab_changed)
-             self.on_current_tab_changed(self.tab_widget.currentIndex()) # Initial call
+             self.on_current_tab_changed(self.tab_widget.currentIndex()) 
              if self.tab_widget.count() == 0:
-                 # If a workspace path is set (e.g., to Desktop by default from FileExplorer init,
-                 # or by user action later), and no tabs are open, create a new file in that workspace.
-                 # The self.current_workspace_path should be set by on_workspace_changed
-                 # signal from FileExplorer's initialization.
                  if self.current_workspace_path and os.path.isdir(self.current_workspace_path): 
                     if hasattr(self, 'file_operations'):
-                        print(f"MainWindow: Creating initial new file in workspace: {self.current_workspace_path}")
                         self.file_operations.new_file(workspace_path=self.current_workspace_path)
-                    else:
-                        print("MainWindow: ERROR - file_operations not available for initial file.")
-                 else:
-                    print(f"MainWindow: No valid current_workspace_path ('{self.current_workspace_path}') at startup or no tabs, not creating initial file.")
-                 # If current_workspace_path is None or invalid, do not create an initial file and do not show any dialog.
-                 # The user can open a folder or create a new file manually.
         else:
              print("错误：MainWindow 未能创建 tab_widget。")
         
@@ -116,25 +92,15 @@ class MainWindow(QMainWindow):
                 lambda: self.update_edit_actions_state(self.get_current_editor_widget())
             )
         self.update_window_title()
-        self.setAcceptDrops(True) # Still needed for general file drops, RootEditorAreaWidget handles tab drops for splitting.
-        # self._split_drop_indicator is now managed by RootEditorAreaWidget
-
-    # def set_initial_workspace(self, path: str): # Removed as FileExplorer now defaults to Desktop
-    #     """Sets the initial workspace path for the application."""
-    #     if path and os.path.isdir(path):
-    #         if hasattr(self, 'file_explorer') and self.file_explorer:
-    #             self.file_explorer.set_root_path(path) 
-    #         else: 
-    #             self.current_workspace_path = path 
-    #             print(f"MainWindow: Initial workspace set to {path} before FileExplorer fully ready.")
+        self.setAcceptDrops(True)
 
     def create_actions(self):
         self.new_action = QAction("新建文本", self, shortcut="Ctrl+N", toolTip="创建新文本文件", triggered=self.new_file_wrapper)
         self.new_html_action = QAction("新建HTML", self, shortcut="Ctrl+Shift+N", toolTip="创建新HTML文件", triggered=self.new_html_file_wrapper)
         self.new_markdown_action = QAction("新建Markdown", self, shortcut="Ctrl+Alt+N", toolTip="创建新Markdown文件", triggered=self.new_markdown_file_wrapper)
         
-        self.open_action = QAction("打开文件...", self, shortcut="Ctrl+O", toolTip="打开文件", triggered=self.open_file_dialog_wrapper) # Renamed for clarity
-        self.open_folder_action = QAction("打开文件夹...", self, shortcut="Ctrl+K Ctrl+O", toolTip="打开文件夹作为工作区", triggered=self.open_folder_wrapper) # New action
+        self.open_action = QAction("打开文件...", self, shortcut="Ctrl+O", toolTip="打开文件", triggered=self.open_file_dialog_wrapper)
+        self.open_folder_action = QAction("打开文件夹...", self, shortcut="Ctrl+K Ctrl+O", toolTip="打开文件夹作为工作区", triggered=self.open_folder_wrapper)
         
         self.save_action = QAction("保存", self, shortcut="Ctrl+S", toolTip="保存文件", triggered=self.save_file_wrapper, enabled=False)
         self.save_as_action = QAction("另存为...", self, shortcut="Ctrl+Shift+S", toolTip="另存为", triggered=self.save_file_as_wrapper, enabled=False)
@@ -165,51 +131,25 @@ class MainWindow(QMainWindow):
         self.reset_zoom_action = QAction("重置缩放", self, shortcut="Ctrl+0", toolTip="重置缩放", triggered=self.reset_zoom)
 
         self.toggle_markdown_preview_action = QAction("MD 预览↔源码", self, checkable=True, shortcut="Ctrl+Shift+M", toolTip="切换Markdown预览/源码", triggered=self.toggle_markdown_preview_panel_wrapper, enabled=False)
-        self.toggle_html_preview_action = QAction("HTML 预览↔源码", self, checkable=True, shortcut="Ctrl+Shift+H", toolTip="切换HTML预览/源码", triggered=self.toggle_html_preview_panel_wrapper, enabled=False)
-        self.toggle_html_richtext_action = QAction("HTML 富文本编辑", self, checkable=True, shortcut="Ctrl+Shift+R", toolTip="切换HTML富文本编辑模式", triggered=self.toggle_html_richtext_panel_wrapper, enabled=False)
+        self.toggle_html_preview_action = QAction("HTML 预览↔源码", self, checkable=True, shortcut="Ctrl+Shift+H", toolTip="切换HTML预览/源码 (WangEditor:源码/富文本)", triggered=self.toggle_html_preview_panel_wrapper, enabled=False) # For WangEditor
+        self.toggle_html_edit_mode_action = QAction("HTML 可视化编辑", self, checkable=True, toolTip="切换HTML可视化编辑模式 (预览窗口)", triggered=self.toggle_editable_html_edit_mode_wrapper, enabled=False) # For EditableHtmlPreviewWidget
+        self.view_html_source_action = QAction("查看HTML源码", self, toolTip="查看当前预览HTML的源码", triggered=self.view_html_source_wrapper, enabled=False) # New action
 
         self.about_action = QAction("关于", self, toolTip="关于", triggered=self.show_about_wrapper)
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("文件")
-        file_menu.addActions([self.new_action, self.new_html_action, self.new_markdown_action])
-        file_menu.addSeparator()
-        file_menu.addAction(self.open_action)
-        file_menu.addAction(self.open_folder_action) # Add new action to menu
-        file_menu.addSeparator()
-        file_menu.addActions([self.save_action, self.save_as_action])
-        file_menu.addSeparator()
-        file_menu.addAction(self.close_tab_action)
-        file_menu.addSeparator()
-        file_menu.addAction(self.exit_action)
-
+        file_menu.addActions([self.new_action, self.new_html_action, self.new_markdown_action, self.open_action, self.open_folder_action, self.save_action, self.save_as_action, self.close_tab_action, self.exit_action])
+        
         edit_menu = menu_bar.addMenu("编辑")
-        edit_menu.addActions([self.undo_action, self.redo_action])
-        edit_menu.addSeparator()
-        edit_menu.addActions([self.cut_action, self.copy_action, self.paste_action])
-        edit_menu.addSeparator()
-        edit_menu.addAction(self.select_all_action)
-        edit_menu.addSeparator()
-        edit_menu.addActions([self.find_action, self.replace_action])
-        edit_menu.addSeparator()
-        edit_menu.addActions([self.translate_action, self.translate_selection_action])
+        edit_menu.addActions([self.undo_action, self.redo_action, self.cut_action, self.copy_action, self.paste_action, self.select_all_action, self.find_action, self.replace_action, self.translate_action, self.translate_selection_action])
 
         format_menu = menu_bar.addMenu("格式")
-        format_menu.addActions([self.font_action, self.color_action])
-        format_menu.addSeparator()
-        format_menu.addAction(self.insert_image_action) # Keep for now, logic in update_edit_actions_state will disable it
-        format_menu.addSeparator()
-        format_menu.addAction(self.toggle_theme_action)
+        format_menu.addActions([self.font_action, self.color_action, self.insert_image_action, self.toggle_theme_action])
         
         view_menu = menu_bar.addMenu("视图")
-        view_menu.addAction(self.zen_action)
-        view_menu.addSeparator()
-        view_menu.addAction(self.toggle_markdown_preview_action)
-        view_menu.addAction(self.toggle_html_preview_action)
-        view_menu.addAction(self.toggle_html_richtext_action)
-        view_menu.addSeparator()
-        view_menu.addActions([self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action])
+        view_menu.addActions([self.zen_action, self.toggle_markdown_preview_action, self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action, self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action])
         
         help_menu = menu_bar.addMenu("帮助")
         help_menu.addAction(self.about_action)
@@ -223,34 +163,26 @@ class MainWindow(QMainWindow):
 
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(20, 20))
-        # self.toolbar.addActions([self.new_action, self.new_html_action, self.new_markdown_action, self.open_action, self.save_action])
         self.toolbar.addAction(self.new_action)
         self.toolbar.addAction(self.new_html_action)
         self.toolbar.addAction(self.new_markdown_action)
         
-        # Create a QToolButton for "Open" with a dropdown menu
         open_menu_button = QToolButton(self)
-        open_menu_button.setText("打开") # Or use an icon
+        open_menu_button.setText("打开")
         open_menu_button.setToolTip("打开文件或文件夹")
         open_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
-        
         open_options_menu = QMenu(open_menu_button)
-        open_options_menu.addAction(self.open_action) # "打开文件..."
-        open_options_menu.addAction(self.open_folder_action) # "打开文件夹..."
-        
+        open_options_menu.addAction(self.open_action)
+        open_options_menu.addAction(self.open_folder_action)
         open_menu_button.setMenu(open_options_menu)
-        open_menu_button.setDefaultAction(self.open_action) # Default click action
+        open_menu_button.setDefaultAction(self.open_action)
         self.toolbar.addWidget(open_menu_button)
         
         self.toolbar.addAction(self.save_action)
         self.toolbar.addSeparator()
-        self.toolbar.addActions([self.undo_action, self.redo_action])
+        self.toolbar.addActions([self.undo_action, self.redo_action, self.find_action, self.translate_action])
         self.toolbar.addSeparator()
-        self.toolbar.addAction(self.find_action)
-        self.toolbar.addSeparator()
-        self.toolbar.addAction(self.translate_action)
-        self.toolbar.addSeparator()
-        self.toolbar.addActions([self.toggle_markdown_preview_action, self.toggle_html_preview_action, self.toggle_html_richtext_action])
+        self.toolbar.addActions([self.toggle_markdown_preview_action, self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action])
         
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -261,18 +193,11 @@ class MainWindow(QMainWindow):
         menu_btn.setToolTip("更多选项")
         menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         more_menu = QMenu(menu_btn)
-        
-        file_submenu = more_menu.addMenu("文件")
-        file_submenu.addActions([self.save_as_action, self.close_tab_action, self.exit_action])
-        edit_submenu = more_menu.addMenu("编辑")
-        edit_submenu.addActions([self.cut_action, self.copy_action, self.paste_action, self.select_all_action, self.replace_action, self.translate_selection_action])
-        format_submenu = more_menu.addMenu("格式")
-        format_submenu.addActions([self.font_action, self.color_action, self.insert_image_action])
-        view_submenu = more_menu.addMenu("视图")
-        view_submenu.addActions([self.toggle_theme_action, self.zen_action, self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action])
-        help_submenu = more_menu.addMenu("帮助")
-        help_submenu.addAction(self.about_action)
-        
+        file_submenu = more_menu.addMenu("文件"); file_submenu.addActions([self.save_as_action, self.close_tab_action, self.exit_action])
+        edit_submenu = more_menu.addMenu("编辑"); edit_submenu.addActions([self.cut_action, self.copy_action, self.paste_action, self.select_all_action, self.replace_action, self.translate_selection_action])
+        format_submenu = more_menu.addMenu("格式"); format_submenu.addActions([self.font_action, self.color_action, self.insert_image_action])
+        view_submenu = more_menu.addMenu("视图"); view_submenu.addActions([self.toggle_theme_action, self.zen_action, self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action])
+        help_submenu = more_menu.addMenu("帮助"); help_submenu.addAction(self.about_action)
         menu_btn.setMenu(more_menu)
         self.toolbar.addWidget(menu_btn)
         self.addAction(self.zen_action)
@@ -280,71 +205,38 @@ class MainWindow(QMainWindow):
     def new_file_wrapper(self):
         if not self.current_workspace_path and hasattr(self, 'file_explorer') and self.file_explorer:
             QMessageBox.information(self, "选择工作区", "请首先选择一个工作区来创建新文件。")
-            self.file_explorer.browse_for_folder()
-            if not self.current_workspace_path: # User cancelled
-                return
+            self.file_explorer.browse_for_folder(); return
         self.file_operations.new_file(workspace_path=self.current_workspace_path)
 
     def new_html_file_wrapper(self):
         if not self.current_workspace_path and hasattr(self, 'file_explorer') and self.file_explorer:
-            QMessageBox.information(self, "选择工作区", "请首先选择一个工作区来创建新HTML文件。")
-            self.file_explorer.browse_for_folder()
-            if not self.current_workspace_path: # User cancelled
-                return
+            QMessageBox.information(self, "选择工作区", "请首先选择一个工作区来创建新HTML文件。"); self.file_explorer.browse_for_folder(); return
         self.file_operations.new_file(file_type="html", workspace_path=self.current_workspace_path)
 
     def new_markdown_file_wrapper(self):
         if not self.current_workspace_path and hasattr(self, 'file_explorer') and self.file_explorer:
-            # Since default is Desktop, this prompt might be less frequent unless Desktop path is invalid
-            QMessageBox.information(self, "选择工作区", "当前未指定有效工作区。请选择一个工作区来创建新Markdown文件。")
-            self.open_folder_wrapper() # Use the new menu action's logic
-            if not self.current_workspace_path: # User cancelled
-                return
+            QMessageBox.information(self, "选择工作区", "当前未指定有效工作区。请选择一个工作区来创建新Markdown文件。"); self.open_folder_wrapper(); return
         self.file_operations.new_file(file_type="markdown", workspace_path=self.current_workspace_path)
 
     def open_file_dialog_wrapper(self): 
-        # Open file dialog should default to current workspace, or home/desktop if no workspace
-        default_open_dir = self.current_workspace_path
-        if not default_open_dir or not os.path.isdir(default_open_dir):
-            from PyQt6.QtCore import QStandardPaths
-            default_open_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
-            if not default_open_dir or not os.path.isdir(default_open_dir):
-                default_open_dir = os.path.expanduser("~")
-        
-        # Define file filters including new media types
-        file_types_list = [
+        default_open_dir = self.current_workspace_path or QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation) or os.path.expanduser("~")
+        filters = ";;".join([
             "所有支持的文件 (*.txt *.md *.markdown *.html *.pdf *.docx *.xlsx *.pptx *.png *.jpg *.jpeg *.gif *.bmp *.webp *.mp4 *.avi *.mkv *.mov *.webm)",
-            "图片文件 (*.png *.jpg *.jpeg *.gif *.bmp *.webp)",
-            "视频文件 (*.mp4 *.avi *.mkv *.mov *.webm)",
-            "Office 文件 (*.docx *.xlsx *.pptx)",
-            "HTML 文件 (*.html)",
-            "Markdown 文件 (*.md *.markdown)",
-            "文本文件 (*.txt)",
-            "PDF 文件 (*.pdf)",
-            "所有文件 (*)"
-        ]
-        filters = ";;".join(file_types_list)
-
-        file_name, _ = QFileDialog.getOpenFileName(
-            self, "打开文件", default_open_dir, filters
-        )
-        if file_name:
-            # The FileOperations class has its own open_file_from_path which is more direct
-            # and handles UI manager interactions.
-            # We call that directly instead of its open_file_dialog.
-            self.file_operations.open_file_from_path(file_name)
-
+            "图片文件 (*.png *.jpg *.jpeg *.gif *.bmp *.webp)", "视频文件 (*.mp4 *.avi *.mkv *.mov *.webm)",
+            "Office 文件 (*.docx *.xlsx *.pptx)", "HTML 文件 (*.html)", "Markdown 文件 (*.md *.markdown)",
+            "文本文件 (*.txt)", "PDF 文件 (*.pdf)", "所有文件 (*)"
+        ])
+        file_name, _ = QFileDialog.getOpenFileName(self, "打开文件", default_open_dir, filters)
+        if file_name: self.file_operations.open_file_from_path(file_name)
 
     def open_folder_wrapper(self):
-        """Wrapper to open folder chooser and set as workspace."""
-        if hasattr(self, 'file_explorer') and self.file_explorer:
-            self.file_explorer.browse_for_folder()
-            # self.current_workspace_path will be updated by on_workspace_changed signal
+        if hasattr(self, 'file_explorer') and self.file_explorer: self.file_explorer.browse_for_folder()
 
     def save_file_wrapper(self): self.file_operations.save_file()
     def save_file_as_wrapper(self): self.file_operations.save_file_as()
     def close_current_tab_wrapper(self):
         if self.ui_manager.tab_widget: self.file_operations.close_tab(self.ui_manager.tab_widget.currentIndex())
+    
     def undo_action_wrapper(self): self.edit_operations.undo_action_handler()
     def redo_action_wrapper(self): self.edit_operations.redo_action_handler()
     def cut_action_wrapper(self): self.edit_operations.cut_action_handler()
@@ -369,87 +261,82 @@ class MainWindow(QMainWindow):
         if isinstance(current_tab_container, MarkdownEditorWidget):
             current_tab_container.set_preview_visible(checked)
 
-    def toggle_html_preview_panel_wrapper(self, checked=None):
-        """切换HTML预览面板"""
+    def toggle_html_preview_panel_wrapper(self, checked=None): # For WangEditor (Source <-> Rich)
         current_tab_container = self.tab_widget.currentWidget()
-        if isinstance(current_tab_container, HtmlEditor):
-            # 如果当前是富文本模式，先切换回源码模式
-            if current_tab_container.current_mode == current_tab_container.RICH_TEXT_MODE:
-                current_tab_container.set_edit_mode(current_tab_container.SOURCE_MODE)
-                self.toggle_html_richtext_action.setChecked(False)
-            
-            # 然后切换到预览模式或源码模式
-            if checked is None: # 如果未指定，则切换
-                checked = not (current_tab_container.current_mode == current_tab_container.PREVIEW_MODE)
-            
-            # 设置为预览模式或源码模式
-            current_tab_container.set_edit_mode(current_tab_container.PREVIEW_MODE if checked else current_tab_container.SOURCE_MODE)
-            self.toggle_html_preview_action.setChecked(checked) # 更新动作状态
-            self.update_edit_actions_state(current_tab_container)
+        if isinstance(current_tab_container, WangEditor):
+            new_mode = 1 - current_tab_container._current_editor_mode 
+            current_tab_container.set_edit_mode(new_mode)
     
-    def toggle_html_richtext_panel_wrapper(self, checked=None):
-        """切换HTML富文本编辑模式"""
+    def toggle_editable_html_edit_mode_wrapper(self, checked=None): # For EditableHtmlPreviewWidget
         current_tab_container = self.tab_widget.currentWidget()
-        if isinstance(current_tab_container, HtmlEditor):
-            # 如果当前是预览模式，先切换回源码模式
-            if current_tab_container.current_mode == current_tab_container.PREVIEW_MODE:
-                current_tab_container.set_edit_mode(current_tab_container.SOURCE_MODE)
-                self.toggle_html_preview_action.setChecked(False)
-            
-            # 然后切换到富文本模式或源码模式
-            if checked is None: # 如果未指定，则切换
-                checked = not (current_tab_container.current_mode == current_tab_container.RICH_TEXT_MODE)
-            
-            # 设置为富文本模式或源码模式
-            current_tab_container.set_edit_mode(current_tab_container.RICH_TEXT_MODE if checked else current_tab_container.SOURCE_MODE)
-            self.toggle_html_richtext_action.setChecked(checked) # 更新动作状态
-            self.update_edit_actions_state(current_tab_container)
-    
-    def _on_html_editor_mode_changed(self, mode):
-        """处理HTML编辑器模式变化的信号"""
-        # 根据模式更新工具栏按钮状态
-        editor_widget = self.get_current_editor_widget()
-        if isinstance(editor_widget, HtmlEditor):
-            self.toggle_html_preview_action.setChecked(mode == editor_widget.PREVIEW_MODE)
-            self.toggle_html_richtext_action.setChecked(mode == editor_widget.RICH_TEXT_MODE)
-        
-        # 更新编辑操作状态
-        editor_widget = self.get_current_editor_widget()
-        if editor_widget:
-            self.update_edit_actions_state(editor_widget)
+        if isinstance(current_tab_container, EditableHtmlPreviewWidget):
+            current_tab_container.toggleEditing()
+            self.toggle_html_edit_mode_action.setChecked(current_tab_container.isEditingEnabled())
 
-    def zoom_in(self): 
-        self.current_zoom_factor=min(self.max_zoom_factor,self.current_zoom_factor+self.zoom_step)
-        self.ui_manager.apply_current_theme()
-        self._apply_content_zoom_to_current_editor()
-    def zoom_out(self): 
-        self.current_zoom_factor=max(self.min_zoom_factor,self.current_zoom_factor-self.zoom_step)
-        self.ui_manager.apply_current_theme()
-        self._apply_content_zoom_to_current_editor()
-    def reset_zoom(self): 
-        self.current_zoom_factor=1.0
-        self.ui_manager.apply_current_theme()
-        self._apply_content_zoom_to_current_editor()
-    
-    def _apply_content_zoom_to_current_editor(self):
-        # This was for old QWebEngineView HtmlEditor. New one uses QPlainTextEdit.
-        # Markdown preview (QWebEngineView) might need its own zoom handling if desired.
-        pass
+    def _on_html_editor_mode_changed(self, mode): # For WangEditor
+        current_tab_container = self.tab_widget.currentWidget()
+        if isinstance(current_tab_container, WangEditor):
+            is_source_mode = (mode == 0)
+            self.toggle_html_preview_action.setChecked(is_source_mode)
+        # DO NOT call self.update_edit_actions_state here to prevent recursion.
+
+    def view_html_source_wrapper(self):
+        current_tab_container = self.tab_widget.currentWidget()
+        if isinstance(current_tab_container, EditableHtmlPreviewWidget):
+            
+            def open_source_in_new_tab(html_content_from_preview: str):
+                if self.tab_widget is None: return # Should not happen if current_tab_container is valid
+
+                current_index_of_preview = self.tab_widget.indexOf(current_tab_container)
+                if current_index_of_preview == -1: return # Should not happen
+
+                original_tab_name = self.tab_widget.tabText(current_index_of_preview)
+                # Remove existing asterisk if present before adding (源码)
+                if original_tab_name.endswith("*"):
+                    original_tab_name = original_tab_name[:-1].strip()
+                source_view_tab_name = f"{original_tab_name} (源码)"
+                
+                source_editor_container = TextEditor() # This is the QWidget container
+                source_editor_container.setPlainText(html_content_from_preview)
+                source_editor_container._editor.setReadOnly(True) # Access internal QPlainTextEdit
+                
+                source_editor_container.setProperty("is_source_view", True) 
+                # Set file_path if the original preview had one, so it's associated
+                original_file_path = current_tab_container.property("file_path")
+                if original_file_path:
+                    source_editor_container.setProperty("file_path", original_file_path + " [源码]") # Mark as source view
+                else: # For untitled previews
+                    source_editor_container.setProperty("untitled_name", source_view_tab_name)
+                source_editor_container.setProperty("is_new", True) # Treat as a new, non-savable tab for simplicity
+
+                active_editor_group = self.ui_manager.get_active_editor_group()
+                target_tab_widget = active_editor_group.get_tab_widget() if active_editor_group else self.tab_widget
+                
+                if target_tab_widget:
+                    index = target_tab_widget.addTab(source_editor_container, source_view_tab_name)
+                    target_tab_widget.setCurrentIndex(index)
+                    source_editor_container.setFocus() # Focus the TextEditor container
+                    
+                    # Mark the new source view tab as not modified
+                    # The TextEditor's document is modified if setPlainText is called.
+                    if hasattr(source_editor_container._editor.document(), 'setModified'):
+                        source_editor_container._editor.document().setModified(False)
+                    self.update_tab_title(source_editor_container, False)
+
+
+            # Use the callback version of getHtml to ensure up-to-date content
+            current_tab_container.getHtml(open_source_in_new_tab)
+
+    def zoom_in(self): self.current_zoom_factor=min(self.max_zoom_factor,self.current_zoom_factor+self.zoom_step); self.ui_manager.apply_current_theme(); self._apply_content_zoom_to_current_editor()
+    def zoom_out(self): self.current_zoom_factor=max(self.min_zoom_factor,self.current_zoom_factor-self.zoom_step); self.ui_manager.apply_current_theme(); self._apply_content_zoom_to_current_editor()
+    def reset_zoom(self): self.current_zoom_factor=1.0; self.ui_manager.apply_current_theme(); self._apply_content_zoom_to_current_editor()
+    def _apply_content_zoom_to_current_editor(self): pass
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            if event.key() in (Qt.Key.Key_Plus, Qt.Key.Key_Equal): 
-                self.zoom_in()
-                event.accept()
-                return
-            if event.key() == Qt.Key.Key_Minus: 
-                self.zoom_out()
-                event.accept()
-                return
-            if event.key() == Qt.Key.Key_0: 
-                self.reset_zoom()
-                event.accept()
-                return
+            if event.key() in (Qt.Key.Key_Plus, Qt.Key.Key_Equal): self.zoom_in(); event.accept(); return
+            if event.key() == Qt.Key.Key_Minus: self.zoom_out(); event.accept(); return
+            if event.key() == Qt.Key.Key_0: self.reset_zoom(); event.accept(); return
         super().keyPressEvent(event)
 
     def get_current_editor_widget(self) -> QWidget | None:
@@ -457,79 +344,87 @@ class MainWindow(QMainWindow):
         current_tab_container = self.ui_manager.tab_widget.currentWidget()
         if not current_tab_container: return None
 
-        if isinstance(current_tab_container, TextEditor):
-            return current_tab_container._editor 
-        if isinstance(current_tab_container, HtmlEditor): 
-             return current_tab_container.source_editor 
-        if isinstance(current_tab_container, MarkdownEditorWidget): 
-             return current_tab_container.editor 
-        if isinstance(current_tab_container, _InternalTextEdit): 
-             return current_tab_container
+        if isinstance(current_tab_container, TextEditor): return current_tab_container._editor
+        if isinstance(current_tab_container, WangEditor):
+             return current_tab_container.source_code_editor if current_tab_container._current_editor_mode == 0 else current_tab_container.web_view
+        if isinstance(current_tab_container, MarkdownEditorWidget): return current_tab_container.editor
+        if isinstance(current_tab_container, EditableHtmlPreviewWidget): return current_tab_container
+        if isinstance(current_tab_container, _InternalTextEdit): return current_tab_container
         
-        # Check for our new view types
-        # Assuming ImageViewWidget and VideoPlayerWidget are the direct widgets in tabs
-        # and don't have a sub-component to return like TextEditor._editor
         module_path = current_tab_container.__class__.__module__
-        if 'image_viewer_view' in module_path or 'video_player_view' in module_path:
+        if 'image_viewer_view' in module_path or \
+           'video_player_view' in module_path or \
+           'pdf_viewer_view' in module_path or \
+           'office_viewer_view' in module_path:
             return current_tab_container
-
         return current_tab_container
 
+    def on_editor_content_changed(self, editor_widget_container, initially_modified: bool | None = None):
+        if not editor_widget_container: return
+        is_modified = True
+        if initially_modified is not None: is_modified = initially_modified
+        
+        editor_widget_container.setProperty("is_modified_custom_flag", is_modified)
+        self.update_tab_title(editor_widget_container, modified=is_modified)
+        
+        if self.tab_widget and self.tab_widget.currentWidget() == editor_widget_container:
+            self.save_action.setEnabled(is_modified)
 
     def on_current_tab_changed(self, index):
         current_editor_component = self.get_current_editor_widget()
         current_tab_container_widget = self.tab_widget.currentWidget() if self.tab_widget else None
 
-        if self.previous_editor and hasattr(self.previous_editor, 'view_mode_changed'):
-            try:
-                if isinstance(self.previous_editor, MarkdownEditorWidget):
-                    self.previous_editor.view_mode_changed.disconnect(self.toggle_markdown_preview_action.setChecked)
-                elif isinstance(self.previous_editor, HtmlEditor):
-                     self.previous_editor.view_mode_changed.disconnect(self.toggle_html_preview_action.setChecked)
-            except TypeError: pass 
+        # Disconnect signals from previous editor
+        if self.previous_editor:
+            if isinstance(self.previous_editor, MarkdownEditorWidget) and hasattr(self.previous_editor, 'view_mode_changed'):
+                try: self.previous_editor.view_mode_changed.disconnect(self.toggle_markdown_preview_action.setChecked)
+                except TypeError: pass
+            elif isinstance(self.previous_editor, WangEditor) and hasattr(self.previous_editor, 'view_mode_changed'):
+                try: self.previous_editor.view_mode_changed.disconnect(self._on_html_editor_mode_changed)
+                except TypeError: pass
+            elif isinstance(self.previous_editor, EditableHtmlPreviewWidget) and hasattr(self.previous_editor, '_bridge'):
+                try: self.previous_editor._bridge.htmlChanged.disconnect() # Disconnect all slots from this signal
+                except TypeError: pass
+        
+        # Configure actions and connect signals for current editor
+        is_markdown_tab = isinstance(current_tab_container_widget, MarkdownEditorWidget)
+        is_wang_editor_tab = isinstance(current_tab_container_widget, WangEditor)
+        is_editable_html_tab = isinstance(current_tab_container_widget, EditableHtmlPreviewWidget)
 
-        if isinstance(current_tab_container_widget, MarkdownEditorWidget):
-            self.toggle_markdown_preview_action.setEnabled(True)
+        self.toggle_markdown_preview_action.setEnabled(is_markdown_tab)
+        if is_markdown_tab:
             current_tab_container_widget.view_mode_changed.connect(self.toggle_markdown_preview_action.setChecked)
             self.toggle_markdown_preview_action.setChecked(current_tab_container_widget.is_preview_mode)
-        else:
-            self.toggle_markdown_preview_action.setEnabled(False)
-            self.toggle_markdown_preview_action.setChecked(False)
-
-        if isinstance(current_tab_container_widget, HtmlEditor):
-            self.toggle_html_preview_action.setEnabled(True)
-            self.toggle_html_richtext_action.setEnabled(True)
-            
-            # 连接模式变化信号
+        
+        self.toggle_html_preview_action.setEnabled(is_wang_editor_tab) # This is for WangEditor (source/rich)
+        if is_wang_editor_tab:
             current_tab_container_widget.view_mode_changed.connect(self._on_html_editor_mode_changed)
-            
-            # 设置初始状态
-            self.toggle_html_preview_action.setChecked(current_tab_container_widget.current_mode == current_tab_container_widget.PREVIEW_MODE)
-            self.toggle_html_richtext_action.setChecked(current_tab_container_widget.current_mode == current_tab_container_widget.RICH_TEXT_MODE)
-        else:
-            self.toggle_html_preview_action.setEnabled(False)
-            self.toggle_html_preview_action.setChecked(False)
-            self.toggle_html_richtext_action.setEnabled(False)
-            self.toggle_html_richtext_action.setChecked(False)
+            self._on_html_editor_mode_changed(current_tab_container_widget._current_editor_mode) # Update checked state
+
+        self.toggle_html_edit_mode_action.setEnabled(is_editable_html_tab) 
+        self.view_html_source_action.setEnabled(is_editable_html_tab) # Enable/disable view source action
+
+        if is_editable_html_tab:
+            current_tab_container_widget._bridge.htmlChanged.connect(
+                lambda html_content, editor=current_tab_container_widget: self.on_editor_content_changed(editor)
+            )
+            self.on_editor_content_changed(current_tab_container_widget, initially_modified=False) 
+            self.toggle_html_edit_mode_action.setChecked(current_tab_container_widget.isEditingEnabled())
         
         self.previous_editor = current_tab_container_widget
-
-        self.update_edit_actions_state(current_editor_component) # Must be after preview actions are updated
+        self.update_edit_actions_state(current_editor_component)
         self.update_window_title()
         self.current_editor_changed.emit(current_editor_component)
-        if current_tab_container_widget: # Check if it's not None
+        if current_tab_container_widget:
             self.view_operations.handle_tab_change(current_tab_container_widget)
 
-        # Focus logic needs to be careful with non-editor widgets
         if current_editor_component and hasattr(current_editor_component, 'setFocus') and \
            self.ui_manager.is_widget_editor(current_editor_component): 
              current_editor_component.setFocus()
         elif current_tab_container_widget and hasattr(current_tab_container_widget, 'setFocus'):
-            # For non-editor views like ImageViewWidget or VideoPlayerWidget, focus the container itself
             module_path = current_tab_container_widget.__class__.__module__
             if 'image_viewer_view' in module_path or 'video_player_view' in module_path:
                  current_tab_container_widget.setFocus()
-
 
     def _update_copy_cut_state(self, available: bool):
         self.copy_action.setEnabled(available)
@@ -545,97 +440,83 @@ class MainWindow(QMainWindow):
         ]
         
         current_tab_container = self.tab_widget.currentWidget() if self.tab_widget else None
-        is_known_editor = self.ui_manager.is_widget_editor(current_widget)
+        is_known_editor = self.ui_manager.is_widget_editor(current_widget) # True for TextEdit, Wang's source_code_editor
         
-        # Determine if the current tab is one of our new view types
-        is_image_view = False
-        is_video_view = False
-        if current_tab_container:
+        is_image_view = False; is_video_view = False
+        is_editable_html_preview = isinstance(current_tab_container, EditableHtmlPreviewWidget)
+
+        if current_tab_container and not is_editable_html_preview:
             module_path = current_tab_container.__class__.__module__
-            if 'image_viewer_view' in module_path:
-                is_image_view = True
-            elif 'video_player_view' in module_path:
-                is_video_view = True
-
-        # 检查当前标签页是否为HTML编辑器或Markdown编辑器
+            if 'image_viewer_view' in module_path: is_image_view = True
+            elif 'video_player_view' in module_path: is_video_view = True
+        
         is_markdown_tab = isinstance(current_tab_container, MarkdownEditorWidget)
-        is_html_tab = isinstance(current_tab_container, HtmlEditor)
+        is_wang_editor_tab = isinstance(current_tab_container, WangEditor)
 
-        # 如果是HTML编辑器，确保HTML预览和富文本编辑按钮始终启用
-        if is_html_tab:
-            self.toggle_html_preview_action.setEnabled(True)
-            self.toggle_html_richtext_action.setEnabled(True)
-            self.toggle_html_preview_action.setChecked(current_tab_container.current_mode == current_tab_container.PREVIEW_MODE)
-            self.toggle_html_richtext_action.setChecked(current_tab_container.current_mode == current_tab_container.RICH_TEXT_MODE)
+        # Default all to false, then enable selectively
+        for action in all_editor_actions: action.setEnabled(False)
+        self.paste_action.setEnabled(False)
+        self.close_tab_action.setEnabled(self.tab_widget.count() > 0 if self.tab_widget else False)
+        
+        # Specific for EditableHtmlPreviewWidget
+        if is_editable_html_preview:
+            is_modified = current_tab_container.property("is_modified_custom_flag") or False
+            self.save_action.setEnabled(is_modified)
+            self.save_as_action.setEnabled(True)
+            self.toggle_html_edit_mode_action.setEnabled(True) 
+            self.toggle_html_edit_mode_action.setChecked(current_tab_container.isEditingEnabled())
+            self.view_html_source_action.setEnabled(True)
+            # Disable WangEditor's specific toggle and Markdown's toggle
+            self.toggle_html_preview_action.setEnabled(False) 
+            self.toggle_markdown_preview_action.setEnabled(False)
+            return 
 
-        if not is_known_editor and not is_image_view and not is_video_view:
-            for action in all_editor_actions:
-                action.setEnabled(False)
-            # Check if clipboard has text using clipboard.text()
-            clipboard = QApplication.clipboard()
-            self.paste_action.setEnabled(bool(clipboard.text())) # Paste might still be possible
-            self.close_tab_action.setEnabled(self.tab_widget.count() > 0 if self.tab_widget else False)
-            
-            # 如果不是HTML编辑器，禁用相关按钮
-            if not is_html_tab:
-                self.toggle_html_preview_action.setEnabled(False)
-                self.toggle_html_richtext_action.setEnabled(False)
-            
-            # 如果不是Markdown编辑器，禁用相关按钮
-            if not is_markdown_tab:
-                self.toggle_markdown_preview_action.setEnabled(False)
-            
-            return
-            
-        # Enable/disable actions based on editor type or view type
+        # For other known editors (TextEditor, Markdown's editor, WangEditor's source_code_editor)
         if is_known_editor:
             is_writable = not current_widget.isReadOnly() if hasattr(current_widget, 'isReadOnly') else True
-            if hasattr(current_widget, 'document') and callable(current_widget.document):
-                doc = current_widget.document()
-                if doc:
-                    self.undo_action.setEnabled(doc.isUndoAvailable())
-                    self.redo_action.setEnabled(doc.isRedoAvailable())
-                    self.save_action.setEnabled(doc.isModified() and is_writable)
-                else:
-                    self.undo_action.setEnabled(False); self.redo_action.setEnabled(False); self.save_action.setEnabled(False)
-            else:
-                self.undo_action.setEnabled(False); self.redo_action.setEnabled(False); self.save_action.setEnabled(False)
+            doc = current_widget.document() if hasattr(current_widget, 'document') else None
+            if doc:
+                self.undo_action.setEnabled(doc.isUndoAvailable())
+                self.redo_action.setEnabled(doc.isRedoAvailable())
+                self.save_action.setEnabled(doc.isModified() and is_writable)
             
-            has_selection = False
-            if hasattr(current_widget, 'textCursor') and callable(current_widget.textCursor):
-                cursor = current_widget.textCursor()
-                if cursor: has_selection = cursor.hasSelection()
-                    
-            self._update_copy_cut_state(has_selection)
+            has_selection = current_widget.textCursor().hasSelection() if hasattr(current_widget, 'textCursor') else False
+            self._update_copy_cut_state(has_selection and is_writable) # Cut only if writable
+            self.copy_action.setEnabled(has_selection) # Copy always if selection
             self.translate_selection_action.setEnabled(has_selection)
             self.select_all_action.setEnabled(True)
             self.find_action.setEnabled(True); self.replace_action.setEnabled(True)
-            self.save_as_action.setEnabled(is_writable) # Save As for editors
+            self.save_as_action.setEnabled(is_writable)
             self.font_action.setEnabled(True); self.color_action.setEnabled(True)
-            self.insert_image_action.setEnabled(False) # Typically for rich text, not plain/code editors
-        else: # For image/video views or other non-editor tabs
-            for action in [self.undo_action, self.redo_action, self.cut_action, self.copy_action, 
-                           self.select_all_action, self.font_action, self.color_action, 
-                           self.insert_image_action, self.find_action, self.replace_action,
-                            self.save_action, self.save_as_action, self.translate_selection_action]:
-                action.setEnabled(False)
+            # insert_image_action is usually for rich text, disable for plain/code. WangEditor handles its own.
+            self.insert_image_action.setEnabled(isinstance(current_widget, QTextEdit) and not isinstance(current_widget, _InternalTextEdit))
 
-        # Check if clipboard has text using clipboard.text() for enabling paste action
+
+        # Paste action
         clipboard = QApplication.clipboard()
-        self.paste_action.setEnabled(bool(clipboard.text()) and is_known_editor) # Paste only for editors
-        self.close_tab_action.setEnabled(True) 
-        
-        is_markdown_tab = isinstance(current_tab_container, MarkdownEditorWidget)
-        is_html_tab = isinstance(current_tab_container, HtmlEditor)
+        can_paste = bool(clipboard.text())
+        if is_known_editor and hasattr(current_widget, 'canPaste') and callable(current_widget.canPaste):
+            can_paste = can_paste and current_widget.canPaste()
+        self.paste_action.setEnabled(can_paste and is_known_editor)
 
+        # View toggles
         self.toggle_markdown_preview_action.setEnabled(is_markdown_tab)
         if is_markdown_tab: self.toggle_markdown_preview_action.setChecked(current_tab_container.is_preview_mode)
         
-        self.toggle_html_preview_action.setEnabled(is_html_tab)
-        self.toggle_html_richtext_action.setEnabled(is_html_tab)
-        if is_html_tab:
-            self.toggle_html_preview_action.setChecked(current_tab_container.current_mode == current_tab_container.PREVIEW_MODE)
-            self.toggle_html_richtext_action.setChecked(current_tab_container.current_mode == current_tab_container.RICH_TEXT_MODE)
+        self.toggle_html_preview_action.setEnabled(is_wang_editor_tab) # For WangEditor (source/rich)
+        if is_wang_editor_tab: 
+            # Directly set the checked state here instead of calling _on_html_editor_mode_changed
+            is_source_mode_wang = (current_tab_container._current_editor_mode == 0)
+            self.toggle_html_preview_action.setChecked(is_source_mode_wang)
+
+        # Disable EditableHTML's toggles if not that tab type
+        if not is_editable_html_preview:
+            self.toggle_html_edit_mode_action.setEnabled(False)
+            self.view_html_source_action.setEnabled(False)
+        else: 
+             self.toggle_html_edit_mode_action.setEnabled(True)
+             self.toggle_html_edit_mode_action.setChecked(current_tab_container.isEditingEnabled())
+             self.view_html_source_action.setEnabled(True)
 
 
     def update_window_title(self):
@@ -643,145 +524,82 @@ class MainWindow(QMainWindow):
         current_tab_idx = self.tab_widget.currentIndex() if self.tab_widget else -1
         if current_tab_idx != -1:
             tab_text = self.tab_widget.tabText(current_tab_idx)
-            if tab_text: # Ensure tab_text is not empty
+            if tab_text: 
                 base_tab_text = tab_text[:-1].strip() if tab_text.endswith("*") else tab_text
                 title_prefix = f"{base_tab_text} - {title_prefix}"
         self.setWindowTitle(title_prefix)
 
-    def update_tab_title(self, modified: bool | None = None):
-        if not (self.ui_manager and self.ui_manager.tab_widget): return
-        index = self.ui_manager.tab_widget.currentIndex()
+    def update_tab_title(self, tab_container_widget, modified: bool | None = None):
+        if not (self.ui_manager and self.ui_manager.tab_widget and tab_container_widget): return
+        
+        index = self.ui_manager.tab_widget.indexOf(tab_container_widget)
         if index == -1: return
-        
-        current_tab_container = self.ui_manager.tab_widget.widget(index)
-        actual_editor_component = self.get_current_editor_widget() # This now can return the view itself
 
-        if modified is None:
-            # For editors, check document.isModified()
+        is_modified_flag = False
+        if isinstance(tab_container_widget, EditableHtmlPreviewWidget):
+            is_modified_flag = tab_container_widget.property("is_modified_custom_flag") or False
+        elif isinstance(tab_container_widget, WangEditor):
+            is_modified_flag = tab_container_widget.isModified() if hasattr(tab_container_widget, 'isModified') else False
+        else: 
+            actual_editor_component = None
+            if isinstance(tab_container_widget, TextEditor): actual_editor_component = tab_container_widget._editor
+            elif isinstance(tab_container_widget, MarkdownEditorWidget): actual_editor_component = tab_container_widget.editor
+            
             if actual_editor_component and hasattr(actual_editor_component, 'document') and \
-               callable(actual_editor_component.document) and self.ui_manager.is_widget_editor(actual_editor_component):
+               callable(actual_editor_component.document):
                 doc = actual_editor_component.document()
-                modified = doc.isModified() if doc else False
-            else:
-                # For non-editor views (like image/video), they are not "modified" in the text sense
-                modified = False 
-
-        base_name = self.ui_manager.get_widget_base_name(current_tab_container)
-        if not base_name: base_name = f"标签 {index + 1}" # Fallback
+                is_modified_flag = doc.isModified() if doc else False
         
-        new_tab_text = f"{base_name}{'*' if modified else ''}"
-        self.ui_manager.tab_widget.setTabText(index, new_tab_text)
-        self.update_window_title()
+        if modified is not None: is_modified_flag = modified
 
+        base_name = self.ui_manager.get_widget_base_name(tab_container_widget)
+        if not base_name: base_name = f"标签 {index + 1}"
+        
+        new_tab_text = f"{base_name}{'*' if is_modified_flag else ''}"
+        self.ui_manager.tab_widget.setTabText(index, new_tab_text)
+        if self.ui_manager.tab_widget.currentWidget() == tab_container_widget:
+            self.update_window_title()
 
     def closeEvent(self, event):
         if self.file_operations.close_all_tabs(): event.accept()
         else: event.ignore()
 
-    # --- Custom Slots for Workspace and File Explorer Interaction ---
     def on_workspace_changed(self, new_path: str):
-        """Slot to handle workspace path changes from FileExplorer."""
         self.current_workspace_path = new_path
-        if hasattr(self, 'statusBar') and self.statusBar: # Check if statusBar exists
+        if hasattr(self, 'statusBar') and self.statusBar:
             self.statusBar.showMessage(f"工作区已更改为: {new_path}", 5000)
-        
-        # Ensure the file explorer panel is visible after a workspace is chosen
         if hasattr(self, 'file_explorer') and self.file_explorer:
-            if not self.file_explorer.isVisible():
-                self.file_explorer.show() # Directly show the panel
-            
-            # Synchronize the activity bar button's state
+            if not self.file_explorer.isVisible(): self.file_explorer.show()
             if hasattr(self, 'toggle_sidebar_button') and self.toggle_sidebar_button:
-                if not self.toggle_sidebar_button.isChecked():
-                    # Set checked without re-triggering the slot that UIInitializer connects to 'clicked'
-                    # QToolButton's setChecked does not emit clicked(), but toggled(bool).
-                    # The UIInitializer connects to 'clicked', so this should be fine.
-                    # The button's visual state will update.
-                    # The actual visibility is handled by file_explorer.show() above.
-                    # And when user clicks the button, UIInitializer's slot will handle it.
-                    self.toggle_sidebar_button.setChecked(True)
-        
-        # Update window title or other UI elements if needed
-        # self.update_window_title() # Could incorporate workspace path into title
+                if not self.toggle_sidebar_button.isChecked(): self.toggle_sidebar_button.setChecked(True)
 
     def handle_file_explorer_double_click(self, file_path: str):
-        """Slot to handle file double-click from FileExplorer."""
-        if hasattr(self.file_operations, 'open_file_from_path') and callable(getattr(self.file_operations, 'open_file_from_path')):
+        if hasattr(self.file_operations, 'open_file_from_path'):
             self.file_operations.open_file_from_path(file_path)
-        elif hasattr(self.file_operations, 'open_file_dialog') and callable(getattr(self.file_operations, 'open_file_dialog')):
-            # Fallback: use open_file_dialog, passing the path.
-            # This isn't ideal as open_file_dialog itself shows a dialog.
-            # The preferred method is open_file_from_path.
-            print(f"MainWindow: open_file_from_path not found, attempting fallback with open_file_dialog for {file_path}")
-            self.file_operations.open_file_dialog(initial_path=file_path)
-        else:
-            QMessageBox.warning(self, "打开文件错误", f"无法处理文件打开请求: {file_path}\nFileOperations模块不完整。")
-            print(f"MainWindow: ERROR - Cannot open file from explorer: {file_path}. FileOperations methods missing.")
+        else: QMessageBox.warning(self, "打开文件错误", f"无法处理文件打开请求: {file_path}\nFileOperations模块不完整。")
 
-    # --- Drag and Drop Event Handlers ---
-    def dragEnterEvent(self, event: QDragEnterEvent): # Corrected type hint
-        mime_data = event.mimeData()
-        # We are interested in file URLs
-        if mime_data.hasUrls():
-            # Check if at least one URL is a local file
-            for url in mime_data.urls():
-                if url.isLocalFile():
-                    event.acceptProposedAction() # Accept the drag if it contains local files
-                    return
-        event.ignore() # Otherwise, ignore the drag
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()):
+            event.acceptProposedAction()
+        else: event.ignore()
 
-    def dropEvent(self, event: QDropEvent): # Corrected type hint
+    def dropEvent(self, event: QDropEvent):
         mime_data = event.mimeData()
         if mime_data.hasUrls():
-            files_to_open = []
-            for url in mime_data.urls():
-                if url.isLocalFile():
-                    file_path = url.toLocalFile()
-                    if os.path.isfile(file_path): # Ensure it's a file, not a directory
-                        files_to_open.append(file_path)
-            
+            files_to_open = [url.toLocalFile() for url in mime_data.urls() if url.isLocalFile() and os.path.isfile(url.toLocalFile())]
             if files_to_open:
-                event.acceptProposedAction() # Crucial: accept the drop action
+                event.acceptProposedAction()
                 for f_path in files_to_open:
-                    if hasattr(self.file_operations, 'open_file_from_path'):
-                        self.file_operations.open_file_from_path(f_path)
-                    else:
-                        print(f"MainWindow: Cannot open dropped file {f_path}, open_file_from_path is missing.")
-                # After handling, ensure the event is marked as accepted and stop further processing by child widgets.
-                # For QMainWindow, accepting the event should be enough.
-                # If child widgets (like QTextEdit) still process it, they might need their acceptDrops set to False
-                # or their own dropEvents overridden to ignore if the parent (MainWindow) handled it.
+                    if hasattr(self.file_operations, 'open_file_from_path'): self.file_operations.open_file_from_path(f_path)
                 return 
         
-        # If the drop doesn't contain URLs or no valid files were found, ignore it.
-        # Let RootEditorAreaWidget handle tab drops if it's the intended target.
-        # If the drop is for files, MainWindow handles it.
         if not mime_data.hasFormat("application/x-qtabwidget-tabbar-tab"):
-            if mime_data.hasUrls():
-                files_to_open = []
-                for url in mime_data.urls():
-                    if url.isLocalFile():
-                        file_path = url.toLocalFile()
-                        if os.path.isfile(file_path):
-                            files_to_open.append(file_path)
-                
+            if mime_data.hasUrls(): # Re-check for file drops not accepted by the first block (e.g. if it was a mix)
+                files_to_open = [url.toLocalFile() for url in mime_data.urls() if url.isLocalFile() and os.path.isfile(url.toLocalFile())]
                 if files_to_open:
                     event.acceptProposedAction()
-                    # Determine active editor group to open files into
-                    active_group = None
-                    if self.root_editor_area and hasattr(self.root_editor_area, 'get_active_editor_group'):
-                        active_group = self.root_editor_area.get_active_editor_group()
-                    
-                    target_tab_widget_for_files = active_group.get_tab_widget() if active_group else self.tab_widget
-
-                    for f_path in files_to_open:
-                        # FileOperations needs to know which tab widget to add to.
-                        # This requires FileOperations to be adapted or to get the target from UIManager.
-                        self.file_operations.open_file_from_path(f_path) # TODO: Adapt to target specific group
+                    for f_path in files_to_open: self.file_operations.open_file_from_path(f_path)
                     return
             event.ignore()
         else:
-            # If it's a tab drop, but not handled by RootEditorAreaWidget (e.g. drop on main window itself, not a split zone)
-            # It should be ignored by MainWindow, allowing child (RootEditorAreaWidget) to handle it if it's over it.
-            # If RootEditorAreaWidget also ignores, then it's a no-op.
-            super().dropEvent(event) # Pass to children or default handling
+            super().dropEvent(event)
