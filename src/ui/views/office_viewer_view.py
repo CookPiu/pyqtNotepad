@@ -38,6 +38,7 @@ class OfficeViewerWidget(QWidget):
         self.web_view.settings().setAttribute(self.web_view.settings().WebAttribute.PluginsEnabled, True)
         self.web_view.settings().setAttribute(self.web_view.settings().WebAttribute.PdfViewerEnabled, True)
         self.temp_html_content_path = None # For storing path to a temp HTML file if setHtml with base URL is problematic
+        self.pdf_conversion_temp_dir = None # To store the path of the directory containing HTML and its resources
 
     def loadFile(self, office_file_path: str, preview_format: str = 'pdf') -> bool: # Added preview_format
         if not WIN32_AVAILABLE:
@@ -75,7 +76,6 @@ class OfficeViewerWidget(QWidget):
                 doc.SaveAs(self.temp_pdf_path, FileFormat=save_format_const)
             elif file_extension == ".xlsx" or file_extension == ".xls":
                 app_dispatch_name = "Excel.Application"
-                # save_format_const is not used for Excel's ExportAsFixedFormat's Type argument
                 office_app = win32com.client.Dispatch(app_dispatch_name)
                 office_app.Visible = False
                 doc = office_app.Workbooks.Open(abs_office_file_path, ReadOnly=True)
@@ -95,25 +95,26 @@ class OfficeViewerWidget(QWidget):
             if preview_format == 'pdf':
                 self.web_view.setUrl(QUrl.fromLocalFile(self.temp_pdf_path))
             elif preview_format == 'html':
-                # Import necessary functions from pdf_utils
-                from ...utils.pdf_utils import extract_pdf_content, APPLICATION_ROOT as PDF_UTILS_APP_ROOT
+                from ...utils.pdf_utils import extract_pdf_content
                 
-                html_content_string = extract_pdf_content(self.temp_pdf_path)
-                
-                # Option 1: Set HTML directly (preferred if truly self-contained)
-                # The APPLICATION_ROOT from pdf_utils might be different if pdf_utils is in a different
-                # relative location to the project root than this file.
-                # For simplicity, let's assume APPLICATION_ROOT from pdf_utils is suitable.
-                # A more robust way might be to pass the project root to setHtml.
-                # For now, using a generic local file base URL.
-                base_url = QUrl.fromLocalFile(os.path.dirname(abs_office_file_path)) # Base URL of original file's dir
-                self.web_view.setHtml(html_content_string, baseUrl=base_url)
+                # extract_pdf_content now returns (full_html_path_to_load, resource_base_dir_path)
+                full_html_path_to_load, resource_base_dir_path = extract_pdf_content(self.temp_pdf_path)
+                self.pdf_conversion_temp_dir = resource_base_dir_path # Store for cleanup
 
-                # Option 2: Save HTML to a temp file and load that (if setHtml has issues with complex content/base URLs)
-                # with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode='w', encoding='utf-8') as tmpfile_html:
-                #     self.temp_html_content_path = tmpfile_html.name
-                #     tmpfile_html.write(html_content_string)
-                # self.web_view.setUrl(QUrl.fromLocalFile(self.temp_html_content_path))
+                if full_html_path_to_load and os.path.exists(full_html_path_to_load):
+                    print(f"DEBUG OfficeViewerWidget: Loading HTML from file: {full_html_path_to_load}")
+                    self.web_view.load(QUrl.fromLocalFile(full_html_path_to_load))
+                else:
+                    error_msg = f"生成HTML文件失败或未找到: {full_html_path_to_load}"
+                    print(f"ERROR OfficeViewerWidget: {error_msg}")
+                    QMessageBox.critical(self, "HTML预览错误", error_msg)
+                    # Clean up the potentially empty or problematic resource_base_dir_path
+                    if resource_base_dir_path and os.path.isdir(resource_base_dir_path):
+                        try:
+                            shutil.rmtree(resource_base_dir_path)
+                        except Exception as e_shutil:
+                            print(f"Error cleaning up resource_base_dir_path on load failure: {e_shutil}")
+                    self.pdf_conversion_temp_dir = None # Nullify as it's cleaned or invalid
             else:
                 QMessageBox.warning(self, "未知预览格式", f"未知的预览格式: {preview_format}")
                 self._cleanup_temp_files()
@@ -134,10 +135,9 @@ class OfficeViewerWidget(QWidget):
             self._cleanup_temp_files()
             return False
         finally:
-            # Close Office doc and Quit app for Office to PDF conversion
             if doc:
                 try:
-                    doc.Close(SaveChanges=0) # 0 for wdDoNotSaveChanges or equivalent
+                    doc.Close(SaveChanges=0) 
                 except Exception as e_close:
                     print(f"Error closing Office document: {e_close}")
             if office_app:
@@ -145,14 +145,11 @@ class OfficeViewerWidget(QWidget):
                     office_app.Quit()
                 except Exception as e_quit:
                     print(f"Error quitting Office application: {e_quit}")
-            # Uninitialize COM
             pythoncom.CoUninitialize()
-            # Release COM objects
-            doc = None # Ensure they are released
+            doc = None 
             office_app = None
 
-
-    def _cleanup_temp_files(self): # Renamed to reflect it might clean more than one
+    def _cleanup_temp_files(self): 
         if self.temp_pdf_path and os.path.exists(self.temp_pdf_path):
             try:
                 os.remove(self.temp_pdf_path)
@@ -170,21 +167,31 @@ class OfficeViewerWidget(QWidget):
                 print(f"Error deleting temporary HTML file '{self.temp_html_content_path}': {e}")
         elif self.temp_html_content_path:
             self.temp_html_content_path = None
+        
+        # Cleanup the directory holding PDF conversion HTML and resources
+        if self.pdf_conversion_temp_dir and os.path.exists(self.pdf_conversion_temp_dir):
+            try:
+                # shutil.rmtree is needed for directories
+                import shutil 
+                shutil.rmtree(self.pdf_conversion_temp_dir)
+                print(f"DEBUG OfficeViewerWidget: Cleaned up PDF conversion temp dir: {self.pdf_conversion_temp_dir}")
+                self.pdf_conversion_temp_dir = None
+            except Exception as e:
+                print(f"Error deleting PDF conversion temp dir '{self.pdf_conversion_temp_dir}': {e}")
+        elif self.pdf_conversion_temp_dir:
+            self.pdf_conversion_temp_dir = None
 
 
     def cleanup(self):
-        """Called when the tab/widget is being closed."""
         self.web_view.stop() 
         self.web_view.setUrl(QUrl("")) 
-        self._cleanup_temp_files() # Call the new cleanup method
+        self._cleanup_temp_files() 
 
     def closeEvent(self, event):
-        """Handle widget close event."""
         self.cleanup()
         super().closeEvent(event)
 
 if __name__ == '__main__':
-    # This is a simple test application for OfficeViewerWidget (PDF conversion)
     if sys.platform == 'win32' and WIN32_AVAILABLE:
         app = QApplication(sys.argv)
         
@@ -206,8 +213,9 @@ if __name__ == '__main__':
             file_path, _ = QFileDialog.getOpenFileName(main_win, "Select Office File", "", 
                                                        "Office Files (*.docx *.doc *.xlsx *.xls *.pptx *.ppt)")
             if file_path:
-                if not viewer.loadFile(file_path):
-                    print(f"Failed to load and convert {file_path}")
+                # Test HTML preview
+                if not viewer.loadFile(file_path, preview_format='html'):
+                    print(f"Failed to load and convert {file_path} to HTML")
         
         btn.clicked.connect(open_test_file)
         

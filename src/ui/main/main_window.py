@@ -21,9 +21,11 @@ from ..docks.optimized_ai_chat_dock import OptimizedAIChatDock  # 导入优化�
 from ..atomic.editor.wang_editor import WangEditor # Import WangEditor
 from ..atomic.markdown_editor_widget import MarkdownEditorWidget
 from ..atomic.editor.text_editor import TextEditor, _InternalTextEdit
-from ..views.editable_html_preview_widget import EditableHtmlPreviewWidget # Added
+# EditableHtmlPreviewWidget is now inside HtmlViewContainer, but still needed for isinstance checks
+from ..views.editable_html_preview_widget import EditableHtmlPreviewWidget 
+from ..composite.html_view_container import HtmlViewContainer # Added
 # PaginatedViewWidget is no longer used.
-# from ..composite.paginated_view_widget import PaginatedViewWidget 
+# from ..composite.paginated_view_widget import PaginatedViewWidget
 # from ..composite.editor_group_widget import EditorGroupWidget # Used by RootEditorAreaWidget
 from ..core.dockable_tab_widget import DockableTabWidget # Used by RootEditorAreaWidget
 from ..composite.root_editor_area_widget import RootEditorAreaWidget # Added
@@ -143,9 +145,16 @@ class MainWindow(QMainWindow):
         self.reset_zoom_action = QAction("重置缩放", self, shortcut="Ctrl+0", toolTip="重置缩放", triggered=self.reset_zoom)
 
         self.toggle_markdown_preview_action = QAction("MD 预览↔源码", self, checkable=True, shortcut="Ctrl+Shift+M", toolTip="切换Markdown预览/源码", triggered=self.toggle_markdown_preview_panel_wrapper, enabled=False)
-        self.toggle_html_preview_action = QAction("HTML 预览↔源码", self, checkable=True, shortcut="Ctrl+Shift+H", toolTip="切换HTML预览/源码 (WangEditor:源码/富文本)", triggered=self.toggle_html_preview_panel_wrapper, enabled=False) # For WangEditor
-        self.toggle_html_edit_mode_action = QAction("HTML 可视化编辑", self, checkable=True, toolTip="切换HTML可视化编辑模式 (预览窗口)", triggered=self.toggle_editable_html_edit_mode_wrapper, enabled=False) # For EditableHtmlPreviewWidget
-        self.view_html_source_action = QAction("查看HTML源码", self, toolTip="查看当前预览HTML的源码", triggered=self.view_html_source_wrapper, enabled=False) # New action
+        
+        # New action for HTML source/preview toggle using HtmlViewContainer
+        self.toggle_html_view_action = QAction("切换HTML视图", self, shortcut="Ctrl+Shift+H", toolTip="切换HTML源码/预览视图", triggered=self.handle_toggle_html_view, enabled=False)
+        
+        # Action for toggling visual edit mode - REMOVED as preview is now always editable (though changes may not save via QWebChannel)
+        # self.toggle_html_visual_edit_action = QAction("HTML可视化编辑", self, checkable=True, toolTip="切换HTML可视化编辑模式", triggered=self.handle_toggle_html_visual_edit, enabled=False)
+
+        # Old HTML actions (to be reviewed/removed or repurposed if WangEditor still needs its own toggle)
+        # self.toggle_html_preview_action = QAction("HTML 预览↔源码 (Wang)", self, checkable=True, toolTip="切换HTML预览/源码 (WangEditor:源码/富文本)", triggered=self.toggle_html_preview_panel_wrapper, enabled=False) # For WangEditor
+        # self.view_html_source_action = QAction("查看HTML源码 (Old)", self, toolTip="查看当前预览HTML的源码 (Old)", triggered=self.view_html_source_wrapper, enabled=False) 
 
         # 创建AI聊天菜单项
         self.toggle_ai_chat_action = QAction("AI对话助手", self, checkable=True, triggered=self.toggle_ai_chat_dock)
@@ -164,7 +173,11 @@ class MainWindow(QMainWindow):
         format_menu.addActions([self.font_action, self.color_action, self.insert_image_action, self.toggle_theme_action, self.pdf_to_html_action])
         
         view_menu = menu_bar.addMenu("视图")
-        view_menu.addActions([self.zen_action, self.toggle_markdown_preview_action, self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action, self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action, self.toggle_ai_chat_action])
+        # Add new HTML actions, remove/comment out old ones
+        view_menu.addActions([self.zen_action, self.toggle_markdown_preview_action, 
+                              self.toggle_html_view_action, # Visual edit action (self.toggle_html_visual_edit_action) removed
+                              # self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action, # Old HTML actions
+                              self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action, self.toggle_ai_chat_action])
         
         help_menu = menu_bar.addMenu("帮助")
         help_menu.addAction(self.about_action)
@@ -197,7 +210,10 @@ class MainWindow(QMainWindow):
         self.toolbar.addSeparator()
         self.toolbar.addActions([self.undo_action, self.redo_action, self.find_action, self.translate_action])
         self.toolbar.addSeparator()
-        self.toolbar.addActions([self.toggle_markdown_preview_action, self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action])
+        # Add new HTML actions to toolbar, remove/comment out old ones
+        self.toolbar.addActions([self.toggle_markdown_preview_action, 
+                                 self.toggle_html_view_action]) # Visual edit action (self.toggle_html_visual_edit_action) removed from toolbar
+        # self.toolbar.addActions([self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action]) # Old HTML actions
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.toggle_ai_chat_action)
         
@@ -354,71 +370,98 @@ class MainWindow(QMainWindow):
         if isinstance(current_tab_container, MarkdownEditorWidget):
             current_tab_container.set_preview_visible(checked)
 
-    def toggle_html_preview_panel_wrapper(self, checked=None): # For WangEditor (Source <-> Rich)
+    # New handler for HtmlViewContainer's view toggle
+    def handle_toggle_html_view(self):
         current_tab_container = self.tab_widget.currentWidget()
-        if isinstance(current_tab_container, WangEditor):
-            new_mode = 1 - current_tab_container._current_editor_mode 
-            current_tab_container.set_edit_mode(new_mode)
+        if isinstance(current_tab_container, HtmlViewContainer):
+            current_tab_container.switch_view()
+            # Update actions based on the new active internal editor
+            self.update_edit_actions_state(current_tab_container.get_current_actual_editor())
+            # Update visual edit toggle state - this action is now removed
+            # is_preview_mode = current_tab_container._current_mode == "preview"
+            # self.toggle_html_visual_edit_action.setEnabled(is_preview_mode) 
+            # if is_preview_mode:
+            #     self.toggle_html_visual_edit_action.setChecked(current_tab_container.preview_widget.isEditingEnabled())
+            # else:
+            #     self.toggle_html_visual_edit_action.setChecked(False)
+        # else:
+            # This action should be disabled if not an HtmlViewContainer, handled by on_current_tab_changed
+
+    # New handler for HtmlViewContainer's visual edit toggle - REMOVED
+    # def handle_toggle_html_visual_edit(self):
+    #     # This logic is no longer needed as the button is removed and preview is default-editable.
+    #     pass
+
+    # Old WangEditor toggle - keep if WangEditor is still used for other HTML-like content
+    # def toggle_html_preview_panel_wrapper(self, checked=None): 
+    #     current_tab_container = self.tab_widget.currentWidget()
+    #     if isinstance(current_tab_container, WangEditor):
+    #         new_mode = 1 - current_tab_container._current_editor_mode 
+    #         current_tab_container.set_edit_mode(new_mode)
     
-    def toggle_editable_html_edit_mode_wrapper(self, checked=None): # For EditableHtmlPreviewWidget
-        current_tab_container = self.tab_widget.currentWidget()
-        if isinstance(current_tab_container, EditableHtmlPreviewWidget):
-            current_tab_container.toggleEditing()
-            self.toggle_html_edit_mode_action.setChecked(current_tab_container.isEditingEnabled())
+    # Old EditableHtmlPreviewWidget direct toggle - now handled by HtmlViewContainer
+    # def toggle_editable_html_edit_mode_wrapper(self, checked=None):
+    #     current_tab_container = self.tab_widget.currentWidget()
+    #     if isinstance(current_tab_container, EditableHtmlPreviewWidget): # This would now be HtmlViewContainer
+    #         current_tab_container.toggleEditing()
+    #         self.toggle_html_edit_mode_action.setChecked(current_tab_container.isEditingEnabled())
 
-    def _on_html_editor_mode_changed(self, mode): # For WangEditor
-        current_tab_container = self.tab_widget.currentWidget()
-        if isinstance(current_tab_container, WangEditor):
-            is_source_mode = (mode == 0)
-            self.toggle_html_preview_action.setChecked(is_source_mode)
-        # DO NOT call self.update_edit_actions_state here to prevent recursion.
+    # Old _on_html_editor_mode_changed for WangEditor
+    # def _on_html_editor_mode_changed(self, mode): 
+    #     current_tab_container = self.tab_widget.currentWidget()
+    #     if isinstance(current_tab_container, WangEditor):
+    #         is_source_mode = (mode == 0)
+    #         # self.toggle_html_preview_action.setChecked(is_source_mode) # Old action
+    #     # DO NOT call self.update_edit_actions_state here to prevent recursion.
 
-    def view_html_source_wrapper(self):
-        current_tab_container = self.tab_widget.currentWidget()
-        if isinstance(current_tab_container, EditableHtmlPreviewWidget):
-            
-            def open_source_in_new_tab(html_content_from_preview: str):
-                if self.tab_widget is None: return # Should not happen if current_tab_container is valid
-
-                current_index_of_preview = self.tab_widget.indexOf(current_tab_container)
-                if current_index_of_preview == -1: return # Should not happen
-
-                original_tab_name = self.tab_widget.tabText(current_index_of_preview)
-                # Remove existing asterisk if present before adding (源码)
-                if original_tab_name.endswith("*"):
-                    original_tab_name = original_tab_name[:-1].strip()
-                source_view_tab_name = f"{original_tab_name} (源码)"
-                
-                source_editor_container = TextEditor() # This is the QWidget container
-                source_editor_container.setPlainText(html_content_from_preview)
-                source_editor_container._editor.setReadOnly(True) # Access internal QPlainTextEdit
-                
-                source_editor_container.setProperty("is_source_view", True) 
-                # Set file_path if the original preview had one, so it's associated
-                original_file_path = current_tab_container.property("file_path")
-                if original_file_path:
-                    source_editor_container.setProperty("file_path", original_file_path + " [源码]") # Mark as source view
-                else: # For untitled previews
-                    source_editor_container.setProperty("untitled_name", source_view_tab_name)
-                source_editor_container.setProperty("is_new", True) # Treat as a new, non-savable tab for simplicity
-
-                active_editor_group = self.ui_manager.get_active_editor_group()
-                target_tab_widget = active_editor_group.get_tab_widget() if active_editor_group else self.tab_widget
-                
-                if target_tab_widget:
-                    index = target_tab_widget.addTab(source_editor_container, source_view_tab_name)
-                    target_tab_widget.setCurrentIndex(index)
-                    source_editor_container.setFocus() # Focus the TextEditor container
-                    
-                    # Mark the new source view tab as not modified
-                    # The TextEditor's document is modified if setPlainText is called.
-                    if hasattr(source_editor_container._editor.document(), 'setModified'):
-                        source_editor_container._editor.document().setModified(False)
-                    self.update_tab_title(source_editor_container, False)
-
-
-            # Use the callback version of getHtml to ensure up-to-date content
-            current_tab_container.getHtml(open_source_in_new_tab)
+    # Old view_html_source_wrapper - replaced by same-tab toggle
+    # def view_html_source_wrapper(self):
+    #     current_tab_container = self.tab_widget.currentWidget()
+    #     # This would need to check for HtmlViewContainer and get its preview_widget
+    #     if isinstance(current_tab_container, HtmlViewContainer) and current_tab_container._current_mode == "preview":
+    #         preview_widget_internal = current_tab_container.preview_widget
+    #         def open_source_in_new_tab(html_content_from_preview: str):
+    #             if self.tab_widget is None: return
+    #
+    #             current_index_of_preview = self.tab_widget.indexOf(current_tab_container)
+    #             if current_index_of_preview == -1: return # Should not happen
+    #
+    #             original_tab_name = self.tab_widget.tabText(current_index_of_preview)
+    #             # Remove existing asterisk if present before adding (源码)
+    #             if original_tab_name.endswith("*"):
+    #                 original_tab_name = original_tab_name[:-1].strip()
+    #             source_view_tab_name = f"{original_tab_name} (源码)"
+    #             
+    #             source_editor_container = TextEditor() # This is the QWidget container
+    #             source_editor_container.setPlainText(html_content_from_preview)
+    #             source_editor_container._editor.setReadOnly(True) # Access internal QPlainTextEdit
+    #             
+    #             source_editor_container.setProperty("is_source_view", True) 
+    #             # Set file_path if the original preview had one, so it's associated
+    #             original_file_path = current_tab_container.property("file_path")
+    #             if original_file_path:
+    #                 source_editor_container.setProperty("file_path", original_file_path + " [源码]") # Mark as source view
+    #             else: # For untitled previews
+    #                 source_editor_container.setProperty("untitled_name", source_view_tab_name)
+    #             source_editor_container.setProperty("is_new", True) # Treat as a new, non-savable tab for simplicity
+    #
+    #             active_editor_group = self.ui_manager.get_active_editor_group()
+    #             target_tab_widget = active_editor_group.get_tab_widget() if active_editor_group else self.tab_widget
+    #             
+    #             if target_tab_widget:
+    #                 index = target_tab_widget.addTab(source_editor_container, source_view_tab_name)
+    #                 target_tab_widget.setCurrentIndex(index)
+    #                 source_editor_container.setFocus() # Focus the TextEditor container
+    #                 
+    #                 # Mark the new source view tab as not modified
+    #                 # The TextEditor's document is modified if setPlainText is called.
+    #                 if hasattr(source_editor_container._editor.document(), 'setModified'):
+    #                     source_editor_container._editor.document().setModified(False)
+    #                 self.update_tab_title(source_editor_container, False)
+    #
+    #
+    #         # Use the callback version of getHtml to ensure up-to-date content
+    #         current_tab_container.getHtml(open_source_in_new_tab)
 
     def zoom_in(self): self.current_zoom_factor=min(self.max_zoom_factor,self.current_zoom_factor+self.zoom_step); self.ui_manager.apply_current_theme(); self._apply_content_zoom_to_current_editor()
     def zoom_out(self): self.current_zoom_factor=max(self.min_zoom_factor,self.current_zoom_factor-self.zoom_step); self.ui_manager.apply_current_theme(); self._apply_content_zoom_to_current_editor()
@@ -437,14 +480,20 @@ class MainWindow(QMainWindow):
         current_tab_container = self.ui_manager.tab_widget.currentWidget()
         if not current_tab_container: return None
 
-        if isinstance(current_tab_container, TextEditor): return current_tab_container._editor
+        if isinstance(current_tab_container, HtmlViewContainer): # New case
+            return current_tab_container.get_current_actual_editor()
+        if isinstance(current_tab_container, TextEditor): # Should be rare now as standalone
+            return current_tab_container._editor
         if isinstance(current_tab_container, WangEditor):
              return current_tab_container.source_code_editor if current_tab_container._current_editor_mode == 0 else current_tab_container.web_view
-        if isinstance(current_tab_container, MarkdownEditorWidget): return current_tab_container.editor
-        if isinstance(current_tab_container, EditableHtmlPreviewWidget): return current_tab_container
-        if isinstance(current_tab_container, _InternalTextEdit): return current_tab_container
+        if isinstance(current_tab_container, MarkdownEditorWidget): 
+            return current_tab_container.editor
+        # EditableHtmlPreviewWidget is now inside HtmlViewContainer
+        # if isinstance(current_tab_container, EditableHtmlPreviewWidget): return current_tab_container 
+        if isinstance(current_tab_container, _InternalTextEdit): # Should be rare
+            return current_tab_container
         
-        module_path = current_tab_container.__class__.__module__
+        module_path = current_tab_container.__class__.__module__ if current_tab_container else ""
         if 'image_viewer_view' in module_path or \
            'video_player_view' in module_path or \
            'pdf_viewer_view' in module_path or \
@@ -467,45 +516,48 @@ class MainWindow(QMainWindow):
         current_editor_component = self.get_current_editor_widget()
         current_tab_container_widget = self.tab_widget.currentWidget() if self.tab_widget else None
 
-        # Disconnect signals from previous editor
+        # Disconnect signals from previous editor (if it was HtmlViewContainer, it handles internal signals)
         if self.previous_editor:
             if isinstance(self.previous_editor, MarkdownEditorWidget) and hasattr(self.previous_editor, 'view_mode_changed'):
                 try: self.previous_editor.view_mode_changed.disconnect(self.toggle_markdown_preview_action.setChecked)
+                except TypeError: pass # Already disconnected or never connected
+            # Add similar disconnects for WangEditor if its specific toggle is kept
+            # For HtmlViewContainer, its internal signals are managed by itself.
+            # If MainWindow connected to HtmlViewContainer.internalModificationChanged, disconnect here.
+            if isinstance(self.previous_editor, HtmlViewContainer):
+                try: self.previous_editor.internalModificationChanged.disconnect(self.handle_html_container_modification)
                 except TypeError: pass
-            elif isinstance(self.previous_editor, WangEditor) and hasattr(self.previous_editor, 'view_mode_changed'):
-                try: self.previous_editor.view_mode_changed.disconnect(self._on_html_editor_mode_changed)
-                except TypeError: pass
-            elif isinstance(self.previous_editor, EditableHtmlPreviewWidget) and hasattr(self.previous_editor, '_bridge'):
-                try: self.previous_editor._bridge.htmlChanged.disconnect() # Disconnect all slots from this signal
-                except TypeError: pass
-        
-        # Configure actions and connect signals for current editor
+
+
         is_markdown_tab = isinstance(current_tab_container_widget, MarkdownEditorWidget)
-        is_wang_editor_tab = isinstance(current_tab_container_widget, WangEditor)
-        is_editable_html_tab = isinstance(current_tab_container_widget, EditableHtmlPreviewWidget)
+        is_html_view_container_tab = isinstance(current_tab_container_widget, HtmlViewContainer)
+        # is_wang_editor_tab = isinstance(current_tab_container_widget, WangEditor) # If WangEditor toggle is kept
 
         self.toggle_markdown_preview_action.setEnabled(is_markdown_tab)
         if is_markdown_tab:
+            # Ensure signal is connected only once or use a robust connection method
+            try: current_tab_container_widget.view_mode_changed.disconnect(self.toggle_markdown_preview_action.setChecked)
+            except TypeError: pass
             current_tab_container_widget.view_mode_changed.connect(self.toggle_markdown_preview_action.setChecked)
             self.toggle_markdown_preview_action.setChecked(current_tab_container_widget.is_preview_mode)
         
-        self.toggle_html_preview_action.setEnabled(is_wang_editor_tab) # This is for WangEditor (source/rich)
-        if is_wang_editor_tab:
-            current_tab_container_widget.view_mode_changed.connect(self._on_html_editor_mode_changed)
-            self._on_html_editor_mode_changed(current_tab_container_widget._current_editor_mode) # Update checked state
+        self.toggle_html_view_action.setEnabled(is_html_view_container_tab)
+        # self.toggle_html_visual_edit_action.setEnabled(False) # Visual edit action removed
 
-        self.toggle_html_edit_mode_action.setEnabled(is_editable_html_tab) 
-        self.view_html_source_action.setEnabled(is_editable_html_tab) # Enable/disable view source action
-
-        if is_editable_html_tab:
-            current_tab_container_widget._bridge.htmlChanged.connect(
-                lambda html_content, editor=current_tab_container_widget: self.on_editor_content_changed(editor)
-            )
-            self.on_editor_content_changed(current_tab_container_widget, initially_modified=False) 
-            self.toggle_html_edit_mode_action.setChecked(current_tab_container_widget.isEditingEnabled())
+        if is_html_view_container_tab:
+            # Connect to the container's modification signal if needed for overall tab state
+            try: current_tab_container_widget.internalModificationChanged.disconnect(self.handle_html_container_modification)
+            except TypeError: pass
+            current_tab_container_widget.internalModificationChanged.connect(self.handle_html_container_modification)
+            
+            # Visual edit action is removed, so no need to update its state here
+            
+            # Initial modified state for the container (delegates to current internal editor)
+            self.on_editor_content_changed(current_tab_container_widget, 
+                                           initially_modified=current_tab_container_widget.is_modified())
         
-        self.previous_editor = current_tab_container_widget
-        self.update_edit_actions_state(current_editor_component)
+        self.previous_editor = current_tab_container_widget # Store the container or other editor
+        self.update_edit_actions_state(current_editor_component) # Pass the actual internal editor or container
         self.update_window_title()
         self.current_editor_changed.emit(current_editor_component)
         if current_tab_container_widget:
@@ -536,36 +588,57 @@ class MainWindow(QMainWindow):
         is_known_editor = self.ui_manager.is_widget_editor(current_widget) # True for TextEdit, Wang's source_code_editor
         
         is_image_view = False; is_video_view = False
-        is_editable_html_preview = isinstance(current_tab_container, EditableHtmlPreviewWidget)
+        is_html_view_container = isinstance(current_tab_container, HtmlViewContainer)
+        is_image_view = False; is_video_view = False
 
-        if current_tab_container and not is_editable_html_preview:
+        if current_tab_container and not is_html_view_container: # Check other types if not HtmlViewContainer
             module_path = current_tab_container.__class__.__module__
             if 'image_viewer_view' in module_path: is_image_view = True
             elif 'video_player_view' in module_path: is_video_view = True
         
         is_markdown_tab = isinstance(current_tab_container, MarkdownEditorWidget)
-        is_wang_editor_tab = isinstance(current_tab_container, WangEditor)
+        # is_wang_editor_tab = isinstance(current_tab_container, WangEditor) # If WangEditor specific toggle is kept
 
-        # Default all to false, then enable selectively
         for action in all_editor_actions: action.setEnabled(False)
         self.paste_action.setEnabled(False)
         self.close_tab_action.setEnabled(self.tab_widget.count() > 0 if self.tab_widget else False)
         
-        # Specific for EditableHtmlPreviewWidget
-        if is_editable_html_preview:
-            is_modified = current_tab_container.property("is_modified_custom_flag") or False
+        # Handle HtmlViewContainer
+        if is_html_view_container:
+            is_modified = current_tab_container.is_modified()
             self.save_action.setEnabled(is_modified)
-            self.save_as_action.setEnabled(True)
-            self.toggle_html_edit_mode_action.setEnabled(True) 
-            self.toggle_html_edit_mode_action.setChecked(current_tab_container.isEditingEnabled())
-            self.view_html_source_action.setEnabled(True)
-            # Disable WangEditor's specific toggle and Markdown's toggle
-            self.toggle_html_preview_action.setEnabled(False) 
-            self.toggle_markdown_preview_action.setEnabled(False)
-            return 
+            self.save_as_action.setEnabled(True) # Can always save as
 
-        # For other known editors (TextEditor, Markdown's editor, WangEditor's source_code_editor)
-        if is_known_editor:
+            self.toggle_html_view_action.setEnabled(True) # Main toggle for HTML container
+            # Visual edit action is removed
+            
+            # Enable text editing actions if current internal editor is TextEditor part of HtmlViewContainer
+            internal_editor = current_tab_container.get_current_actual_editor()
+            if isinstance(internal_editor, _InternalTextEdit): # Check for the QPlainTextEdit
+                is_writable_internal = not internal_editor.isReadOnly()
+                doc_internal = internal_editor.document()
+                if doc_internal:
+                    self.undo_action.setEnabled(doc_internal.isUndoAvailable())
+                    self.redo_action.setEnabled(doc_internal.isRedoAvailable())
+                has_selection_internal = internal_editor.textCursor().hasSelection()
+                self.cut_action.setEnabled(has_selection_internal and is_writable_internal)
+                self.copy_action.setEnabled(has_selection_internal)
+                self.translate_selection_action.setEnabled(has_selection_internal)
+                self.select_all_action.setEnabled(True)
+                self.find_action.setEnabled(True); self.replace_action.setEnabled(True)
+                self.font_action.setEnabled(True); self.color_action.setEnabled(True)
+                # Paste for internal text editor
+                clipboard_internal = QApplication.clipboard()
+                can_paste_internal = bool(clipboard_internal.text()) and internal_editor.canPaste()
+                self.paste_action.setEnabled(can_paste_internal)
+
+            # Disable Markdown specific toggle
+            self.toggle_markdown_preview_action.setEnabled(False)
+            return # Handled HtmlViewContainer
+
+        # For other known editors (Markdown, WangEditor if separate, etc.)
+        # current_widget here is the actual editor part (e.g., Markdown's QPlainTextEdit)
+        if is_known_editor: # This 'is_known_editor' now applies to Markdown's editor, WangEditor's internal
             is_writable = not current_widget.isReadOnly() if hasattr(current_widget, 'isReadOnly') else True
             doc = current_widget.document() if hasattr(current_widget, 'document') else None
             if doc:
@@ -592,24 +665,29 @@ class MainWindow(QMainWindow):
             can_paste = can_paste and current_widget.canPaste()
         self.paste_action.setEnabled(can_paste and is_known_editor)
 
-        # View toggles
+        # View toggles for non-HtmlViewContainer tabs
         self.toggle_markdown_preview_action.setEnabled(is_markdown_tab)
-        if is_markdown_tab: self.toggle_markdown_preview_action.setChecked(current_tab_container.is_preview_mode)
+        if is_markdown_tab: 
+            self.toggle_markdown_preview_action.setChecked(current_tab_container.is_preview_mode)
         
-        self.toggle_html_preview_action.setEnabled(is_wang_editor_tab) # For WangEditor (source/rich)
-        if is_wang_editor_tab: 
-            # Directly set the checked state here instead of calling _on_html_editor_mode_changed
-            is_source_mode_wang = (current_tab_container._current_editor_mode == 0)
-            self.toggle_html_preview_action.setChecked(is_source_mode_wang)
+        # If WangEditor has its own toggle, handle it here
+        # self.toggle_html_preview_action.setEnabled(is_wang_editor_tab) 
+        # if is_wang_editor_tab: 
+        #     is_source_mode_wang = (current_tab_container._current_editor_mode == 0)
+        #     self.toggle_html_preview_action.setChecked(is_source_mode_wang)
 
-        # Disable EditableHTML's toggles if not that tab type
-        if not is_editable_html_preview:
-            self.toggle_html_edit_mode_action.setEnabled(False)
-            self.view_html_source_action.setEnabled(False)
-        else: 
-             self.toggle_html_edit_mode_action.setEnabled(True)
-             self.toggle_html_edit_mode_action.setChecked(current_tab_container.isEditingEnabled())
-             self.view_html_source_action.setEnabled(True)
+        # Ensure HTML specific toggles are disabled if not an HTML container
+        if not is_html_view_container:
+            self.toggle_html_view_action.setEnabled(False)
+            # self.toggle_html_visual_edit_action.setEnabled(False) # Visual edit action removed
+    
+    def handle_html_container_modification(self, modified: bool):
+        """Slot to connect to HtmlViewContainer.internalModificationChanged."""
+        current_tab_container = self.tab_widget.currentWidget()
+        if isinstance(current_tab_container, HtmlViewContainer):
+            self.update_tab_title(current_tab_container, modified)
+            if self.tab_widget.currentWidget() == current_tab_container:
+                self.save_action.setEnabled(modified)
 
 
     def update_window_title(self):
@@ -629,21 +707,27 @@ class MainWindow(QMainWindow):
         if index == -1: return
 
         is_modified_flag = False
-        if isinstance(tab_container_widget, EditableHtmlPreviewWidget):
+        if isinstance(tab_container_widget, HtmlViewContainer): # Check HtmlViewContainer first
+            is_modified_flag = tab_container_widget.is_modified()
+        elif isinstance(tab_container_widget, EditableHtmlPreviewWidget): # Should not be top-level now
             is_modified_flag = tab_container_widget.property("is_modified_custom_flag") or False
         elif isinstance(tab_container_widget, WangEditor):
             is_modified_flag = tab_container_widget.isModified() if hasattr(tab_container_widget, 'isModified') else False
-        else: 
-            actual_editor_component = None
-            if isinstance(tab_container_widget, TextEditor): actual_editor_component = tab_container_widget._editor
-            elif isinstance(tab_container_widget, MarkdownEditorWidget): actual_editor_component = tab_container_widget.editor
-            
+        elif isinstance(tab_container_widget, MarkdownEditorWidget): # Check for MarkdownEditorWidget directly
+            actual_editor_component = tab_container_widget.editor
             if actual_editor_component and hasattr(actual_editor_component, 'document') and \
                callable(actual_editor_component.document):
                 doc = actual_editor_component.document()
                 is_modified_flag = doc.isModified() if doc else False
+        elif isinstance(tab_container_widget, TextEditor): # Standalone TextEditor (rare)
+             actual_editor_component = tab_container_widget._editor
+             if actual_editor_component and hasattr(actual_editor_component, 'document') and \
+               callable(actual_editor_component.document):
+                doc = actual_editor_component.document()
+                is_modified_flag = doc.isModified() if doc else False
         
-        if modified is not None: is_modified_flag = modified
+        if modified is not None: # Override if 'modified' is explicitly passed
+            is_modified_flag = modified
 
         base_name = self.ui_manager.get_widget_base_name(tab_container_widget)
         if not base_name: base_name = f"标签 {index + 1}"

@@ -2,6 +2,7 @@ import os
 from PyQt6.QtWidgets import QDockWidget, QMessageBox, QWidget, QTabWidget, QApplication
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, pyqtSlot, QUrl
 from PyQt6.QtGui import QIcon, QColor
+import shutil # Added for cleaning up resource directory
 
 # --- Corrected Relative Imports ---
 from ..composite.combined_tools import CombinedTools
@@ -23,8 +24,9 @@ from ..core.theme_manager import ThemeManager
 from ..composite.editor_group_widget import EditorGroupWidget # Added
 
 # --- Worker for PDF to HTML conversion ---
-class PdfToHtmlWorkerForUIManager(QObject): # Worker is already a QObject
-    conversion_finished = pyqtSignal(str, str) # pdf_path, html_content
+class PdfToHtmlWorkerForUIManager(QObject):
+    # Signal now emits: pdf_path, full_html_file_path, resource_base_dir_path
+    conversion_finished = pyqtSignal(str, str, str) 
     conversion_error = pyqtSignal(str, str)    # error_title, error_message
 
     def __init__(self, pdf_path):
@@ -34,8 +36,9 @@ class PdfToHtmlWorkerForUIManager(QObject): # Worker is already a QObject
     @pyqtSlot()
     def run(self):
         try:
-            html_content = pdf_utils.extract_pdf_content(self.pdf_path)
-            self.conversion_finished.emit(self.pdf_path, html_content)
+            # extract_pdf_content now returns (full_html_path, temp_dir_path)
+            full_html_path, resource_base_dir_path = pdf_utils.extract_pdf_content(self.pdf_path)
+            self.conversion_finished.emit(self.pdf_path, full_html_path, resource_base_dir_path)
         except FileNotFoundError as e:
             self.conversion_error.emit("文件错误", str(e))
         except RuntimeError as e:
@@ -57,13 +60,8 @@ class UIManager(QObject): # Inherit from QObject
         self.active_editor_group: EditorGroupWidget | None = None
         
         self.pdf_conversion_thread = None 
-        self.pdf_conversion_worker = None 
-        
-        self.register_speech_recognition()
-        self.register_view(NoteDownloaderView, "NoteDownloader") 
-        self.register_view(CalculatorWidget, "计算器")
-        self.register_view(TimerWidget, "计时器")
-        # self.tool_box_view_instances = {} # To keep track of instances specifically in the toolbox
+        self.pdf_conversion_worker = None
+        self.pdf_conversion_resource_dirs = {} # pdf_path: resource_dir_path
 
     def apply_current_theme(self):
         """应用当前主题和缩放级别到UI组件"""
@@ -197,11 +195,10 @@ class UIManager(QObject): # Inherit from QObject
                 if pdf_viewer_tab_widget.load_pdf(abs_pdf_path):
                     tab_name = os.path.basename(abs_pdf_path)
                     
-                    # Ensure tab_widget is valid, try to get from main_window if UIManager's is None
                     current_tab_widget = self.tab_widget
                     if not current_tab_widget and hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget:
                         current_tab_widget = self.main_window.tab_widget
-                        self.tab_widget = current_tab_widget # Update UIManager's own reference
+                        self.tab_widget = current_tab_widget 
 
                     if not current_tab_widget:
                         QMessageBox.critical(self.main_window, "错误", "标签页管理器未能正确初始化或访问。")
@@ -247,26 +244,46 @@ class UIManager(QObject): # Inherit from QObject
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         self.pdf_conversion_thread.start()
 
-    @pyqtSlot(str, str)
-    def _on_pdf_to_html_conversion_finished(self, pdf_path: str, html_content: str):
+    @pyqtSlot(str, str, str) # pdf_path, full_html_file_path, resource_base_dir_path
+    def _on_pdf_to_html_conversion_finished(self, pdf_path: str, full_html_file_path: str, resource_base_dir_path: str):
         QApplication.restoreOverrideCursor()
         status_bar = getattr(self.main_window, 'statusBar', None)
         if status_bar:
             status_bar.showMessage(f"'{os.path.basename(pdf_path)}' 已成功转换为 HTML。", 5000)
 
-        if not html_content:
-            QMessageBox.warning(self.main_window, "警告", "从 PDF 提取的 HTML 内容为空。")
+        if not full_html_file_path or not os.path.exists(full_html_file_path):
+            QMessageBox.warning(self.main_window, "警告", f"PDF转换后的HTML文件未找到或无效: {full_html_file_path}")
             self._clear_conversion_refs()
+            if resource_base_dir_path and os.path.isdir(resource_base_dir_path):
+                try:
+                    shutil.rmtree(resource_base_dir_path)
+                    print(f"DEBUG UIManager: Cleaned up resource dir {resource_base_dir_path} due to missing HTML file.")
+                except Exception as e_shutil:
+                    print(f"DEBUG UIManager: Error cleaning up resource dir {resource_base_dir_path}: {e_shutil}")
             return
 
+        # Store the resource directory path for later cleanup when the tab is closed
+        self.pdf_conversion_resource_dirs[pdf_path] = resource_base_dir_path
+        
         base_name = os.path.basename(pdf_path)
-        untitled_name = f"{os.path.splitext(base_name)[0]}.html (源码)"
+        untitled_name = f"{os.path.splitext(base_name)[0]}.html (预览)"
 
-        # 使用EditableHtmlPreviewWidget而不是WangEditor打开HTML内容
-        from ..views.editable_html_preview_widget import EditableHtmlPreviewWidget
+        # Import HtmlViewContainer
+        from ..composite.html_view_container import HtmlViewContainer
         
         try:
-            # 获取当前活动的标签页控件
+            # Read the content of the generated HTML file
+            html_content_for_container = ""
+            try:
+                with open(full_html_file_path, 'r', encoding='utf-8') as f_html:
+                    html_content_for_container = f_html.read()
+            except Exception as e_read:
+                QMessageBox.critical(self.main_window, "错误", f"无法读取转换后的HTML文件内容: {full_html_file_path}\n{e_read}")
+                if resource_base_dir_path and os.path.isdir(resource_base_dir_path):
+                    shutil.rmtree(resource_base_dir_path)
+                self._clear_conversion_refs()
+                return
+
             target_tab_widget = self.tab_widget
             if not target_tab_widget and hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget:
                 target_tab_widget = self.main_window.tab_widget
@@ -274,28 +291,50 @@ class UIManager(QObject): # Inherit from QObject
             if not target_tab_widget:
                 QMessageBox.critical(self.main_window, "错误", "标签页管理器未能正确初始化或访问。")
                 self._clear_conversion_refs()
+                if resource_base_dir_path and os.path.isdir(resource_base_dir_path): 
+                    shutil.rmtree(resource_base_dir_path)
                 return
             
-            # 创建基于WebEngine的HTML预览组件
-            html_viewer = EditableHtmlPreviewWidget()
-            html_viewer.setHtml(html_content)
+            # Create HtmlViewContainer instead of EditableHtmlPreviewWidget directly
+            # Treat it as an "existing" file (is_new_file=False) so it loads from file_path in preview mode
+            # The file_path here is the temporary HTML file from PDF conversion.
+            html_viewer_container = HtmlViewContainer(parent=self.main_window,
+                                                      file_path=full_html_file_path,
+                                                      initial_content=html_content_for_container,
+                                                      is_new_file=False, # So it loads from file_path
+                                                      main_window_ref=self.main_window)
             
-            # 设置属性
-            html_viewer.setProperty("is_new", True)
-            html_viewer.setProperty("untitled_name", untitled_name)
+            # HtmlViewContainer's __init__ for is_new_file=False should call:
+            # self.preview_widget.load(QUrl.fromLocalFile(self.file_path))
+            # So, no explicit load() call needed here on html_viewer_container.preview_widget
             
-            # 添加到标签页
-            index = target_tab_widget.addTab(html_viewer, untitled_name)
+            html_viewer_container.setProperty("is_new", True) # Still mark as "new" in terms of not being a user-saved file
+            html_viewer_container.setProperty("untitled_name", untitled_name)
+            html_viewer_container.setProperty("pdf_source_path", pdf_path) # Store original PDF path
+            # The resource_dir_path is implicitly handled by loading the HTML file from that dir.
+            # However, we still need to pass it for cleanup if HtmlViewContainer doesn't manage it.
+            # Let's assume HtmlViewContainer's internal preview_widget needs this for cleanup if it's special.
+            # For now, UIManager tracks pdf_conversion_resource_dirs for cleanup.
+            # If HtmlViewContainer's tab is closed, FileOperations.close_tab needs to know if it's a PDF-converted HTML.
+            # We can set a property on HtmlViewContainer itself.
+            html_viewer_container.setProperty("resource_dir_path", resource_base_dir_path)
+
+
+            index = target_tab_widget.addTab(html_viewer_container, untitled_name)
             target_tab_widget.setCurrentIndex(index)
-            html_viewer.setFocus()
+            html_viewer_container.setFocus() # HtmlViewContainer will delegate focus
             
-            # 设置初始未修改状态
+            # HtmlViewContainer's __init__ (for is_new_file=False) calls on_editor_content_changed
+            # for its preview_widget. If we need to signal for the container itself:
             if hasattr(self.main_window, 'on_editor_content_changed'):
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(0, lambda ed=html_viewer: self.main_window.on_editor_content_changed(ed, initially_modified=False))
-            
+                 from PyQt6.QtCore import QTimer
+                 # Signal for the container, initially not modified.
+                 QTimer.singleShot(0, lambda ed=html_viewer_container: self.main_window.on_editor_content_changed(ed, initially_modified=False))
+
         except Exception as e:
-            QMessageBox.critical(self.main_window, "错误", f"创建HTML预览时出错: {e}")
+            QMessageBox.critical(self.main_window, "错误", f"创建HTML预览容器时出错: {e}")
+            if resource_base_dir_path and os.path.isdir(resource_base_dir_path): # Cleanup on error
+                shutil.rmtree(resource_base_dir_path)
         
         self._clear_conversion_refs()
 
@@ -307,23 +346,14 @@ class UIManager(QObject): # Inherit from QObject
             status_bar.showMessage(f"HTML 转换失败: {title}", 5000)
         QMessageBox.critical(self.main_window, title, error_message)
         self._clear_conversion_refs()
+        # Note: resource_base_dir_path is not available here to clean up,
+        # as it's only passed on success. The converter should handle its own temp dir on error.
 
     def _clear_conversion_refs(self):
         self.pdf_conversion_worker = None
         self.pdf_conversion_thread = None
     
-    # _handle_pdf_html_generated is effectively replaced by the threaded conversion logic above.
-    # If it was connected to any signals, those connections should be reviewed.
-    # For now, commenting out its old content.
     def _handle_pdf_html_generated(self, pdf_path: str, html_content: str):
-        """
-        DEPRECATED: This method's functionality is now handled by 
-        _start_pdf_to_html_conversion and its connected slots.
-        """
-        # print("DEPRECATED: _handle_pdf_html_generated called. This logic should be reviewed.")
-        # If this is still called, it means an old signal connection might exist.
-        # The new PdfViewerView (QWebEngineView based) does not emit htmlGenerated.
-        # The PdfActionChoiceDialog triggers the new threaded conversion.
         pass
     
     def sidebar_item_clicked(self, item):
@@ -342,10 +372,10 @@ class UIManager(QObject): # Inherit from QObject
         else:
              QMessageBox.information(self.main_window, "功能占位符", f"'{item_text}' 功能尚未实现或注册。")
 
-    def convert_pdf_to_html_wrapper(self, pdf_path: str): # This might be called from a menu?
-         self._start_pdf_to_html_conversion(pdf_path) # Use the threaded version
+    def convert_pdf_to_html_wrapper(self, pdf_path: str): 
+         self._start_pdf_to_html_conversion(pdf_path) 
     
-    def convert_pdf_to_html(self, pdf_path: str): # Direct call, also use threaded version
+    def convert_pdf_to_html(self, pdf_path: str): 
         self._start_pdf_to_html_conversion(pdf_path)
 
     def create_tab_widget(self):
@@ -368,10 +398,11 @@ class UIManager(QObject): # Inherit from QObject
              self.main_window.tab_widget = None
 
     def register_view(self, view_class: type[BaseWidget], view_name: str, icon_name: str | None = None):
+         print(f"DEBUG UIManager.register_view: Attempting to register '{view_name}' with class {view_class.__name__}")
          if view_name in self.registered_views:
              print(f"警告: 视图 '{view_name}' 已注册。将被覆盖。")
          self.registered_views[view_name] = {"class": view_class, "icon": icon_name}
-         print(f"视图已注册: {view_name} (Class: {view_class.__name__})")
+         print(f"视图已注册: {view_name} (Class: {view_class.__name__}), Total registered: {len(self.registered_views)}")
 
     def open_view(self, view_name: str, open_in_dock: bool = False, open_in_tool_box: bool = False, bring_to_front: bool = True):
         if view_name not in self.registered_views:
@@ -382,9 +413,6 @@ class UIManager(QObject): # Inherit from QObject
         view_class = view_info["class"]
         icon_name = view_info["icon"]
         icon = QIcon.fromTheme(icon_name) if icon_name else QIcon()
-
-        # Check if instance already exists (for toolbox or general view_instances)
-        # This logic might need refinement if a view can be in a dock AND toolbox simultaneously (not typical)
         instance = self.view_instances.get(view_name)
 
         if open_in_tool_box:
@@ -393,27 +421,22 @@ class UIManager(QObject): # Inherit from QObject
                 return None
             
             tool_box = self.main_window.tool_box_widget
-            # Check if already in toolbox
             for i in range(tool_box.count()):
-                if tool_box.widget(i) == instance and instance is not None: # Check if the specific instance is there
+                if tool_box.widget(i) == instance and instance is not None: 
                     if bring_to_front: tool_box.setCurrentIndex(i)
-                    tool_box.show() # Ensure toolbox is visible
-                    instance.show() # Ensure the panel/widget itself is visible
+                    tool_box.show() 
+                    instance.show() 
                     return instance
-            
-            # If not found or instance is None, create new
             try:
                 if instance is None: 
                     if view_name == "NoteDownloader" and hasattr(self.main_window, 'note_downloader_panel'):
                         instance = self.main_window.note_downloader_panel
-                        # NoteDownloaderPanel might already be in view_instances if registered before UI init
                         if view_name not in self.view_instances or self.view_instances[view_name] != instance:
                              self.view_instances[view_name] = instance
                     else:
                         instance = view_class(self.main_window)
                         self.view_instances[view_name] = instance
                 
-                # Ensure the instance (especially if it's a PanelWidget like NoteDownloader) is visible itself
                 if hasattr(instance, 'show') and callable(instance.show):
                     instance.show()
 
@@ -421,7 +444,7 @@ class UIManager(QObject): # Inherit from QObject
                 if bring_to_front: 
                     tool_box.setCurrentIndex(index)
                 
-                if not tool_box.isVisible(): # Ensure toolbox itself is visible
+                if not tool_box.isVisible(): 
                     tool_box.show()
                 return instance
             except Exception as e:
@@ -430,67 +453,54 @@ class UIManager(QObject): # Inherit from QObject
 
         elif open_in_dock:
             dock = self.view_docks.get(view_name)
-            instance_to_use = instance # Could be None initially
+            instance_to_use = instance 
 
-            # Special handling for NoteDownloader: use its pre-created content widget
             if view_name == "NoteDownloader":
                 if hasattr(self.main_window, 'note_downloader_view_content') and self.main_window.note_downloader_view_content:
                     instance_to_use = self.main_window.note_downloader_view_content
-                    # Ensure it's in view_instances if not already
                     if view_name not in self.view_instances or self.view_instances[view_name] != instance_to_use:
                         self.view_instances[view_name] = instance_to_use
                 else:
                     QMessageBox.critical(self.main_window, "错误", "NoteDownloader 内容视图未初始化。")
                     return None
             
-            # If an instance exists (either pre-existing or NoteDownloader's content)
-            # but it's not in a dock, or the dock's widget is different, recreate the dock.
             if instance_to_use and (not dock or dock.widget() != instance_to_use):
-                if dock: # Remove old dock if its widget is wrong or gone
-                    # Check if the widget is the PanelWidget for NoteDownloader, if so, special care
+                if dock: 
                     if view_name == "NoteDownloader" and dock.widget() == self.main_window.note_downloader_panel:
-                        # The panel itself is not the instance we want in the dock, its content is.
-                        # So, just detach and delete the dock.
-                        pass # No need to delete the panel, just the dock.
+                        pass 
                     
                     current_widget_in_dock = dock.widget()
-                    dock.setWidget(None) # Detach widget
+                    dock.setWidget(None) 
                     if current_widget_in_dock and current_widget_in_dock != self.main_window.note_downloader_view_content:
-                        # Only delete if it's not the persistent NoteDownloader content
-                        # current_widget_in_dock.deleteLater() # Be careful with deleting shared instances
                         pass
 
                     dock.deleteLater()
-                    if view_name in self.view_docks: # Ensure key exists before deleting
+                    if view_name in self.view_docks: 
                         del self.view_docks[view_name]
-                dock = None # Force dock recreation
+                dock = None 
 
             if dock and dock.widget() == instance_to_use and instance_to_use is not None:
                 if bring_to_front:
                     dock.show()
                     dock.raise_()
-                return dock # Return the dock itself, or instance_to_use? Let's return dock.
+                return dock 
             
             try:
-                if instance_to_use is None: # Create instance if it truly doesn't exist (and not NoteDownloader)
+                if instance_to_use is None: 
                     instance_to_use = view_class(self.main_window)
                     self.view_instances[view_name] = instance_to_use
 
                 dock = QDockWidget(view_name, self.main_window)
                 dock.setObjectName(f"{view_name}Dock")
-                dock.setWidget(instance_to_use) # Use instance_to_use (which could be NoteDownloader's content)
+                dock.setWidget(instance_to_use) 
                 dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-                # Make docks float by default, user can dock them. Or set a default area.
-                # dock.setFloating(True) 
-                self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock) # Default to right
+                self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock) 
                 self.view_docks[view_name] = dock
                 
-                # Connect visibilityChanged to update activity bar button state
                 dock.visibilityChanged.connect(
                     lambda visible, vn=view_name: self._handle_dock_visibility_change(vn, visible)
                 )
 
-                # Attempt to tabify with other docks in the same area
                 for existing_dock_name, existing_dock_obj in self.view_docks.items():
                     if existing_dock_obj != dock and self.main_window.dockWidgetArea(existing_dock_obj) == self.main_window.dockWidgetArea(dock):
                         self.main_window.tabifyDockWidget(existing_dock_obj, dock)
@@ -501,22 +511,15 @@ class UIManager(QObject): # Inherit from QObject
                     dock.raise_()
                 
                 if view_name == "NoteDownloader":
-                    # Attempt to set initial width for NoteDownloader dock
-                    # This might need to be adjusted or done via QMainWindow's splitter if applicable
                     try:
-                        # Calculate desired width (e.g., 1/3 of main window width)
-                        # Ensure main_window has a valid width property
                         if hasattr(self.main_window, 'width') and callable(self.main_window.width):
                             main_window_width = self.main_window.width()
                             if main_window_width > 0:
-                                desired_width = int(main_window_width * 0.45) # Target 45% of main window width
+                                desired_width = int(main_window_width * 0.45) 
                                 
-                                # Set minimum width for the content widget of the dock
                                 if instance_to_use and hasattr(instance_to_use, 'setMinimumWidth'):
                                     instance_to_use.setMinimumWidth(desired_width)
                                     print(f"NoteDownloader content widget minimum width set to {desired_width}px.")
-
-                                # Still attempt to resize the dock itself as a hint to QMainWindow
                                 self.main_window.resizeDocks([dock], [desired_width], Qt.Orientation.Horizontal)
                                 print(f"NoteDownloader dock '{view_name}' resize attempted to {desired_width}px width (45% of main window).")
                             else:
@@ -526,7 +529,7 @@ class UIManager(QObject): # Inherit from QObject
                     except Exception as e_resize:
                         print(f"Error trying to resize NoteDownloader dock '{view_name}': {e_resize}")
                         
-                return dock # Return the dock
+                return dock 
             except Exception as e:
                 QMessageBox.critical(self.main_window, "打开视图错误", f"创建停靠视图 '{view_name}' 时出错: {e}")
                 import traceback
@@ -537,37 +540,22 @@ class UIManager(QObject): # Inherit from QObject
             return None
 
     def _handle_dock_visibility_change(self, view_name: str, visible: bool):
-        """Updates the activity bar button when a dock's visibility changes."""
-        if not visible: # If dock becomes hidden (e.g., closed by user via 'X')
+        if not visible: 
             if hasattr(self.main_window, 'activity_view_buttons'):
                 button = self.main_window.activity_view_buttons.get(view_name)
                 if button and button.isChecked():
-                    button.setChecked(False) # Uncheck the corresponding activity bar button
+                    button.setChecked(False) 
 
     def close_dock_view(self, view_name: str):
-        """Closes (hides) a dock view."""
         dock = self.view_docks.get(view_name)
         if dock:
-            dock.hide() # Hide the dock. This will trigger visibilityChanged.
-            # If you want to fully close and remove:
-            # dock.close() 
-            # if dock.widget() and view_name != "NoteDownloader": # Don't delete NoteDownloader's shared content
-            #     dock.widget().deleteLater() # Delete the instance inside the dock
-            # dock.deleteLater()
-            # if view_name in self.view_docks: del self.view_docks[view_name]
-            # if view_name in self.view_instances and view_name != "NoteDownloader":
-            #     del self.view_instances[view_name]
+            dock.hide() 
         
-        # The visibilityChanged signal from the dock should handle unchecking the button.
-
     def close_view_in_tool_box(self, view_name: str):
-        """Closes a view tab in the bottom toolbox."""
         if not hasattr(self.main_window, 'tool_box_widget') or not self.main_window.tool_box_widget:
             return
 
         tool_box = self.main_window.tool_box_widget
-        
-        # For NoteDownloader, the instance is self.main_window.note_downloader_panel
         instance_to_find = None
         if view_name == "NoteDownloader":
             instance_to_find = getattr(self.main_window, 'note_downloader_panel', None)
@@ -575,25 +563,18 @@ class UIManager(QObject): # Inherit from QObject
             instance_to_find = self.view_instances.get(view_name)
 
         if not instance_to_find:
-            return # Instance not found, nothing to close
+            return 
 
         for i in range(tool_box.count()):
             widget_in_tab = tool_box.widget(i)
             if widget_in_tab == instance_to_find:
                 tool_box.removeTab(i)
-                # We don't delete the instance from self.view_instances here,
-                # as it might be reused or managed elsewhere (e.g. NoteDownloaderPanel is persistent).
-                # If a tool is meant to be fully discarded, its instance should be deleted.
-                # For now, just remove from toolbox.
-                # If it's not NoteDownloader, we can consider removing from self.view_instances
-                # if these are meant to be transient when closed from toolbox.
                 if view_name != "NoteDownloader" and view_name in self.view_instances:
-                    # instance_to_find.deleteLater() # If it should be destroyed
-                    pass # Or just keep the instance in self.view_instances for reuse
+                    pass 
                 break
         
         if tool_box.count() == 0 and tool_box.isVisible():
-             tool_box.hide() # Optionally hide toolbox if empty
+             tool_box.hide() 
 
 
     def is_widget_editor(self, widget: QWidget | None) -> bool:
@@ -607,11 +588,9 @@ class UIManager(QObject): # Inherit from QObject
          return isinstance(widget, HtmlEditor)
 
     def get_widget_base_name(self, widget: QWidget | None) -> str | None:
-         # This method might be called with either the editor widget or its container (e.g. EditorGroupWidget)
-         # It should ideally get properties from the actual editor content if widget is a container.
          actual_content_widget = widget
-         if isinstance(widget, EditorGroupWidget): # Check if it's an EditorGroupWidget
-             actual_content_widget = widget.current_widget() # Get the current editor from the group
+         if isinstance(widget, EditorGroupWidget): 
+             actual_content_widget = widget.current_widget() 
          
          if not actual_content_widget: return None
          
@@ -628,12 +607,11 @@ class UIManager(QObject): # Inherit from QObject
             for group in self.main_window.root_editor_area.editor_groups:
                 tab_widget = group.get_tab_widget()
                 for i in range(tab_widget.count()):
-                    widget_in_tab = tab_widget.widget(i) # This is the editor/viewer itself
+                    widget_in_tab = tab_widget.widget(i) 
                     editor_path = widget_in_tab.property("file_path")
                     if editor_path and os.path.abspath(editor_path) == abs_file_path:
                         return True
-        # Fallback for safety, though root_editor_area should always exist after init
-        elif self.tab_widget: # Check the UIManager's current tab_widget (active group's)
+        elif self.tab_widget: 
             for i in range(self.tab_widget.count()):
                 widget = self.tab_widget.widget(i)
                 editor_path = widget.property("file_path")
@@ -650,15 +628,12 @@ class UIManager(QObject): # Inherit from QObject
                     widget_in_tab = tab_widget.widget(i)
                     editor_path = widget_in_tab.property("file_path")
                     if editor_path and os.path.abspath(editor_path) == abs_file_path:
-                        # Make this group active and set its tab current
-                        self.set_active_editor_group(group) # This will update self.tab_widget
+                        self.set_active_editor_group(group) 
                         group.get_tab_widget().setCurrentIndex(i)
-                        # Ensure the main window layout gives focus if necessary
                         if hasattr(self.main_window, 'root_editor_area'):
-                           self.main_window.root_editor_area.activateWindow() # or specific group.setFocus()
+                           self.main_window.root_editor_area.activateWindow() 
                         widget_in_tab.setFocus()
                         return
-        # Fallback
         elif self.tab_widget:
              for i in range(self.tab_widget.count()):
                 widget = self.tab_widget.widget(i)
@@ -669,34 +644,23 @@ class UIManager(QObject): # Inherit from QObject
                     break
                     
     def register_speech_recognition(self):
-        """注册语音识别组件"""
         self.register_view(SpeechRecognitionWidget, "SpeechRecognition", "microphone")
 
     def set_active_editor_group(self, group: EditorGroupWidget | None):
-        """Sets the currently active editor group."""
-        # print(f"UIManager: Active editor group set to: {id(group) if group else 'None'}")
         self.active_editor_group = group
-        if group: # Update the main tab_widget reference if a group becomes active
+        if group: 
             self.tab_widget = group.get_tab_widget()
-            # If MainWindow's tab_widget also needs update (it should if it's the primary one)
             if hasattr(self.main_window, 'tab_widget'):
                 self.main_window.tab_widget = self.tab_widget
-        # If group is None, what should self.tab_widget be? 
-        # Perhaps the first group's tab_widget or None if no groups.
-        # This logic might need refinement based on how empty splitters are handled.
 
     def get_active_editor_group(self) -> EditorGroupWidget | None:
-        """Gets the currently active editor group."""
-        # A more robust way might involve checking focus across all editor groups
-        # or having RootEditorAreaWidget manage and report the active one.
         if self.active_editor_group and self.active_editor_group.isVisible() and self.active_editor_group.count() > 0:
             return self.active_editor_group
         
-        # Fallback: if no active_editor_group is set, or it's invalid, try to find one
         if hasattr(self.main_window, 'root_editor_area') and self.main_window.root_editor_area:
             active_group_from_root = self.main_window.root_editor_area.get_active_editor_group()
             if active_group_from_root:
-                self.set_active_editor_group(active_group_from_root) # Update internal state
+                self.set_active_editor_group(active_group_from_root) 
                 return active_group_from_root
         
-        return None # No active group found
+        return None

@@ -137,12 +137,23 @@ def extract_pdf_content(pdf_path: str) -> str:
     try:
         # 使用PDF2HTMLConverter类进行转换
         converter = PDF2HTMLConverter()
-        html_content = converter.convert_pdf_to_html(pdf_path)
+        # convert_pdf_to_html 现在返回 (html_filename, temp_dir_path)
+        html_filename, temp_dir_path = converter.convert_pdf_to_html(pdf_path)
         
-        # 保持与原有功能一致，将pt单位转换为px
-        html_content = re.sub(r'([\d.]+)pt', lambda m: f"{float(m.group(1)) * 96/72:.2f}px", html_content)
-        
-        return html_content
+        # 构建主HTML文件的完整路径
+        full_html_path = os.path.join(temp_dir_path, html_filename)
+
+        # 读取HTML内容用于可能的pt到px转换 (如果仍然需要对内容字符串进行操作)
+        # 但如果直接用load()，这个转换可能需要在JS端或不进行
+        # 为了保持pt到px的转换，我们还是读取内容，但这内容不直接用于setHtml
+        # with open(full_html_path, 'r', encoding='utf-8') as f:
+        #     html_content_for_conversion = f.read()
+        # html_content_for_conversion = re.sub(r'([\d.]+)pt', lambda m: f"{float(m.group(1)) * 96/72:.2f}px", html_content_for_conversion)
+        # 这里我们不再返回修改后的html_content，因为我们将使用load()加载原始文件
+        # 如果确实需要修改文件内容再加载，则需要将修改后的内容写回文件或使用setHtml
+
+        # 返回主HTML文件的完整路径和其所在目录的路径
+        return full_html_path, temp_dir_path
 
     except Exception as e:
         # 捕获并重新抛出异常，保持与原有错误处理一致
