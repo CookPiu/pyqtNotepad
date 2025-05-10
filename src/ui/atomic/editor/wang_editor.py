@@ -1,4 +1,4 @@
-from PyQt6.QtCore import QUrl, pyqtSignal, QObject, pyqtSlot
+from PyQt6.QtCore import QUrl, pyqtSignal, QObject, pyqtSlot, QUrlQuery
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 from PyQt6.QtWebEngineCore import QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -8,26 +8,26 @@ import sys
 
 class PyQtBridge(QObject):
     """用于JavaScript和PyQt之间的通信桥接"""
-    contentChanged = pyqtSignal(str)
-    editorReady = pyqtSignal()
-    fileImported = pyqtSignal(str)  # 文件导入信号，参数为文件名
-    exportFile = pyqtSignal(str)   # 文件导出信号，参数为内容
+    contentChangedSignal = pyqtSignal(str) 
+    editorReadySignal = pyqtSignal()      # Renamed signal
+    fileImportedSignal = pyqtSignal(str)  # Renamed signal
+    exportFileSignal = pyqtSignal(str)    # Renamed signal
     
     @pyqtSlot(str)
-    def contentChanged(self, html):
-        self.contentChanged.emit(html)
+    def contentChanged(self, html): # Slot name for JS
+        self.contentChangedSignal.emit(html)
     
     @pyqtSlot()
-    def editorReady(self):
-        self.editorReady.emit()
+    def editorReady(self): # Slot name for JS
+        self.editorReadySignal.emit()
         
     @pyqtSlot(str)
-    def fileImported(self, filename):
-        self.fileImported.emit(filename)
+    def fileImported(self, filename): # Slot name for JS
+        self.fileImportedSignal.emit(filename)
         
     @pyqtSlot(str)
-    def exportFile(self, content):
-        self.exportFile.emit(content)
+    def exportFile(self, content): # Slot name for JS
+        self.exportFileSignal.emit(content)
 
 
 class WangEditor(QWidget):
@@ -56,10 +56,10 @@ class WangEditor(QWidget):
         
         # 创建通信桥接
         self.bridge = PyQtBridge(self)
-        self.bridge.contentChanged.connect(self._on_content_changed)
-        self.bridge.editorReady.connect(self._on_editor_ready)
-        self.bridge.fileImported.connect(self._on_file_imported)
-        self.bridge.exportFile.connect(self._on_export_file)
+        self.bridge.contentChangedSignal.connect(self._on_content_changed)
+        self.bridge.editorReadySignal.connect(self._on_editor_ready)     # Connect to renamed signal
+        self.bridge.fileImportedSignal.connect(self._on_file_imported) # Connect to renamed signal
+        self.bridge.exportFileSignal.connect(self._on_export_file)     # Connect to renamed signal
         
         # 将桥接对象添加到JavaScript环境
         self.web_view.page().setWebChannel(self._create_web_channel())
@@ -67,20 +67,37 @@ class WangEditor(QWidget):
         # 添加WebEngineView到布局
         layout.addWidget(self.web_view)
         self.setLayout(layout)
+
+        # 连接loadFinished信号
+        self.web_view.loadFinished.connect(self._on_load_finished)
         
         # 加载wangEditor HTML文件
         self._load_editor()
     
     def _create_web_channel(self):
         from PyQt6.QtWebChannel import QWebChannel
-        channel = QWebChannel(self.web_view.page())
+        # Try setting the parent of QWebChannel to self (the WangEditor widget)
+        # instead of self.web_view.page() to see if it affects lifecycle or availability.
+        channel = QWebChannel(self) 
         channel.registerObject("pyqtBridge", self.bridge)
         return channel
     
+    def _on_load_finished(self, success):
+        print(f"Page load finished. Success: {success}")
+        if not success:
+            # 可以根据需要添加更详细的错误处理或日志记录
+            page = self.web_view.page()
+            print(f"Page load error: {page.loadErrorCode()}, URL: {page.url().toString()}") # Qt 6.2+
+            # For older Qt versions, error information might be harder to get directly here.
+
     def _load_editor(self):
+        # 尝试禁用缓存 - HttpCacheEnabled 属性在当前PyQt版本可能不存在，暂时注释掉
+        # settings = self.web_view.page().settings()
+        # settings.setAttribute(QWebEngineSettings.WebAttribute.HttpCacheEnabled, False) 
+
         # 获取wangEditor的HTML文件路径
         editor_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), 
-                                 "wangEditor", "editor.html")
+                                 "wangEditor", "editor.html") # Restore to original editor.html
         
         # 确保文件存在
         if not os.path.exists(editor_path):
@@ -89,12 +106,20 @@ class WangEditor(QWidget):
             QMessageBox.critical(self, "错误", f"找不到wangEditor HTML文件: {editor_path}")
             return
         
+        # 为URL附加时间戳以尝试绕过缓存
+        import time
+        url = QUrl.fromLocalFile(editor_path)
+        query = QUrlQuery()
+        query.addQueryItem("timestamp", str(int(time.time())))
+        url.setQuery(query)
+        
         # 加载编辑器
-        self.web_view.load(QUrl.fromLocalFile(editor_path))
-        print(f"正在加载编辑器: {editor_path}")
+        self.web_view.load(url)
+        print(f"正在加载编辑器 (尝试禁用缓存): {url.toString()}")
     
     def _on_content_changed(self, html):
         # 当编辑器内容变化时触发
+        # print(f"Editor content changed (Python side): {html[:100]}...") # Debugging line
         if not self._is_modified:
             self._is_modified = True
             self.document_modified.emit(True)
@@ -148,6 +173,7 @@ class WangEditor(QWidget):
     
     def setHtml(self, html_source: str, baseUrl=None):
         """设置HTML内容"""
+        print(f"DEBUG: WangEditor.setHtml called with html_source (first 100 chars): {html_source[:100]}") # 调试打印
         # 使用JavaScript接口设置内容
         # 转义反引号和其他特殊字符，确保JavaScript代码正确执行
         escaped_html = html_source.replace('`', '\`').replace('\\', '\\\\')

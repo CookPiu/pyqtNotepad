@@ -5,7 +5,8 @@ from PyQt6.QtCore import QSignalBlocker, QTimer # Added QTimer
 
 # Corrected relative imports
 from ..atomic.editor.text_editor import TextEditor
-from ..atomic.editor.html_editor import HtmlEditor
+# from ..atomic.editor.html_editor import HtmlEditor # Will be replaced by WangEditor
+from ..atomic.editor.wang_editor import WangEditor # Import WangEditor
 from ..atomic.markdown_editor_widget import MarkdownEditorWidget
 from ..views.pdf_viewer_view import PdfViewerView
 from ..views.office_viewer_view import OfficeViewerWidget
@@ -26,7 +27,7 @@ class FileOperations:
         editor = None
         tab_name_suffix = ""
         if file_type == "html":
-            editor = HtmlEditor()
+            editor = WangEditor() # Use WangEditor
             tab_name_suffix = ".html"
         elif file_type == "markdown":
             editor = MarkdownEditorWidget()
@@ -145,8 +146,8 @@ class FileOperations:
             actual_editor_part_to_focus = editor_widget
             if isinstance(editor_widget, MarkdownEditorWidget):
                 actual_editor_part_to_focus = editor_widget.editor
-            elif isinstance(editor_widget, HtmlEditor):
-                actual_editor_part_to_focus = editor_widget.source_editor
+            elif isinstance(editor_widget, WangEditor): # Use WangEditor
+                actual_editor_part_to_focus = editor_widget # WangEditor handles its own focus
             elif isinstance(editor_widget, TextEditor):
                 actual_editor_part_to_focus = editor_widget._editor
             
@@ -361,7 +362,7 @@ class FileOperations:
 
         filters = "HTML文件 (*.html);;Markdown文件 (*.md *.markdown);;文本文件 (*.txt);;所有文件 (*)"
         default_filter = "文本文件 (*.txt)"
-        if isinstance(current_tab_container, HtmlEditor): default_filter = "HTML文件 (*.html)"
+        if isinstance(current_tab_container, WangEditor): default_filter = "HTML文件 (*.html)" # Use WangEditor
         elif isinstance(current_tab_container, MarkdownEditorWidget): default_filter = "Markdown文件 (*.md *.markdown)"
 
         file_name, selected_filter = QFileDialog.getSaveFileName(
@@ -409,7 +410,7 @@ class FileOperations:
         
         editor_component = None 
         if isinstance(widget_in_tab, TextEditor): editor_component = widget_in_tab._editor
-        elif isinstance(widget_in_tab, HtmlEditor): editor_component = widget_in_tab.source_editor
+        elif isinstance(widget_in_tab, WangEditor): editor_component = widget_in_tab # Use WangEditor, editor_component is the widget itself
         elif isinstance(widget_in_tab, MarkdownEditorWidget): editor_component = widget_in_tab.editor
         else: editor_component = widget_in_tab 
 
@@ -495,9 +496,9 @@ class FileOperations:
 
         try:
             if file_type == "html":
-                editor_container = HtmlEditor()
+                editor_container = WangEditor() # Use WangEditor
                 editor_container.setHtml(content)
-                actual_editor_part = editor_container.source_editor
+                actual_editor_part = editor_container # WangEditor itself or its web_view for focus
             elif file_type == "markdown":
                 editor_container = MarkdownEditorWidget()
                 editor_container.set_content(content)

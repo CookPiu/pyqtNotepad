@@ -1,30 +1,38 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>wangEditor</title>
-  <link href="node_modules\@wangeditor\editor\dist\css\style.css" rel="stylesheet"/>
+  <link href="file:///f:/Project/pyqtNotepad/wangEditor/node_modules/@wangeditor/editor/dist/css/style.css"
+    rel="stylesheet" />
   <style>
     #editor-wrapper {
       border: 1px solid #ccc;
       z-index: 100;
     }
+
     #toolbar-container {
       border-bottom: 1px solid #ccc;
     }
+
     #editor-container {
       height: 500px;
       overflow-y: auto;
     }
+
     .hidden {
       display: none;
     }
+
     .file-actions {
       margin: 10px 0;
       padding: 5px;
       background-color: #f5f5f5;
       border-top: 1px solid #ccc;
     }
+
     .file-actions button {
       margin-right: 10px;
       padding: 5px 10px;
@@ -34,15 +42,18 @@
       border-radius: 3px;
       cursor: pointer;
     }
+
     .file-actions button:hover {
       background-color: #45a049;
     }
+
     #file-input {
       display: none;
     }
   </style>
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 </head>
+
 <body>
   <div id="editor-wrapper">
     <div id="toolbar-container"><!-- 工具栏 --></div>
@@ -53,31 +64,52 @@
       <input type="file" id="file-input" accept=".html,.txt,.md" />
     </div>
   </div>
-  
+
   <!-- 用于与PyQt通信的隐藏元素 -->
   <textarea id="html-output" class="hidden"></textarea>
   <div id="file-io-status" class="hidden"></div>
-  
-  <script src="node_modules\@wangeditor\editor\dist\index.js"></script>
+
+  <script src="file:///f:/Project/pyqtNotepad/wangEditor/node_modules/@wangeditor/editor/dist/index.js"></script>
   <script>
     // 初始化WebChannel通信
     let pyqtBridge = null;
-    
+
     function initWebChannel() {
-      if (typeof QWebChannel !== 'undefined') {
-        new QWebChannel(qt.webChannelTransport, function(channel) {
-          window.pyqtBridge = channel.objects.pyqtBridge;
-          console.log('WebChannel initialized');
-          // 通知PyQt编辑器已准备就绪
-          if (window.pyqtBridge) {
-            window.pyqtBridge.editorReady();
-          }
-        });
-      } else {
-        console.error('QWebChannel not found');
+      // Ensure QWebChannel is defined (it should be, due to the script include)
+      if (typeof QWebChannel === 'undefined') {
+        console.error('QWebChannel class is not defined. qwebchannel.js might not have loaded.');
+        return;
       }
+
+      // Wait for qt.webChannelTransport to be ready
+      let attempt = 0;
+      const maxAttempts = 50; // Try for 5 seconds (50 * 100ms)
+      function attemptInit() {
+        if (window.qt && window.qt.webChannelTransport) {
+          console.log('qt.webChannelTransport is ready. Initializing QWebChannel.');
+          new QWebChannel(qt.webChannelTransport, function (channel) {
+            window.pyqtBridge = channel.objects.pyqtBridge;
+            console.log('WebChannel initialized, pyqtBridge obtained.');
+            if (window.pyqtBridge) {
+              console.log('Calling pyqtBridge.editorReady()');
+              window.pyqtBridge.editorReady();
+            } else {
+              console.error('pyqtBridge object not found in channel.objects');
+            }
+          });
+        } else {
+          attempt++;
+          if (attempt < maxAttempts) {
+            console.warn(`qt.webChannelTransport not ready (attempt ${attempt}/${maxAttempts}). Retrying in 100ms...`);
+            setTimeout(attemptInit, 100);
+          } else {
+            console.error(`Failed to initialize QWebChannel: qt.webChannelTransport not available after ${maxAttempts} attempts.`);
+          }
+        }
+      }
+      attemptInit();
     }
-    
+
     // 初始化编辑器
     const { createEditor, createToolbar } = window.wangEditor
 
@@ -102,7 +134,24 @@
     })
 
     // 工具栏配置
-    const toolbarConfig = {}
+    const toolbarConfig = {
+      // 恢复为较完整的配置
+      toolbarKeys: [
+        'headerSelect', 'blockquote', '|',
+        'bold', 'italic', 'underline', 'through', 'sup', 'sub', 'code', 'clearStyle', '|',
+        'color', 'bgColor', '|',
+        'fontSize', 'fontFamily', 'lineHeight', '|',
+        'bulletedList', 'numberedList', 'todo', '|',
+        'justifyLeft', 'justifyRight', 'justifyCenter', 'justifyJustify', 'indent', 'delIndent', '|',
+        'emotion', 'insertLink', 'uploadImage', 'insertVideo', 'insertTable', 'codeBlock', 'divider', '|',
+        'undo', 'redo', '|',
+        'fullScreen'
+      ],
+      // 如果需要禁用某些特定功能组，可以在这里配置 excludeKeys
+      // excludeKeys: [
+      //   'group-image' // 例如，禁用图片上传和网络图片
+      // ]
+    }
 
     // 创建工具栏
     const toolbar = createToolbar({
@@ -113,26 +162,26 @@
     })
 
     // 与PyQt通信的接口
-    window.setHtmlContent = function(html) {
+    window.setHtmlContent = function (html) {
       editor.setHtml(html)
       document.getElementById('html-output').value = html
     }
 
-    window.getHtmlContent = function() {
+    window.getHtmlContent = function () {
       return editor.getHtml()
     }
-    
+
     // 文件导入功能
-    document.getElementById('import-file-btn').addEventListener('click', function() {
+    document.getElementById('import-file-btn').addEventListener('click', function () {
       document.getElementById('file-input').click();
     });
-    
-    document.getElementById('file-input').addEventListener('change', function(e) {
+
+    document.getElementById('file-input').addEventListener('change', function (e) {
       const file = e.target.files[0];
       if (!file) return;
-      
+
       const reader = new FileReader();
-      reader.onload = function(e) {
+      reader.onload = function (e) {
         const content = e.target.result;
         // 设置编辑器内容
         editor.setHtml(content);
@@ -144,20 +193,21 @@
       };
       reader.readAsText(file);
     });
-    
+
     // 文件导出功能
-    document.getElementById('export-file-btn').addEventListener('click', function() {
+    document.getElementById('export-file-btn').addEventListener('click', function () {
       const content = editor.getHtml();
       // 通知PyQt导出文件
       if (window.pyqtBridge) {
         window.pyqtBridge.exportFile(content);
       }
     });
-    
+
     // 当页面加载完成时初始化WebChannel
-    window.addEventListener('load', function() {
+    window.addEventListener('load', function () {
       initWebChannel();
     })
   </script>
 </body>
+
 </html>

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>WebChannel Test</title>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+
+<body>
+  <h1>WebChannel Test Page</h1>
+  <script>
+    function initTestChannel() {
+      if (typeof QWebChannel === 'undefined') {
+        console.error('[Test Page] QWebChannel class is not defined.');
+        document.body.innerHTML += '<p style="color:red;">QWebChannel class NOT DEFINED!</p>';
+        return;
+      }
+      console.log('[Test Page] QWebChannel class IS defined.');
+
+      let attempt = 0;
+      const maxAttempts = 50; // 5 seconds
+      function attemptInit() {
+        if (window.qt && window.qt.webChannelTransport) {
+          console.log('[Test Page] qt.webChannelTransport IS READY. Initializing QWebChannel.');
+          document.body.innerHTML += '<p style="color:green;">qt.webChannelTransport IS READY!</p>';
+          try {
+            new QWebChannel(qt.webChannelTransport, function (channel) {
+              console.log('[Test Page] QWebChannel connection established!');
+              document.body.innerHTML += '<p style="color:green;">QWebChannel connection established!</p>';
+              window.testBridge = channel.objects.pyqtBridge; // Assuming pyqtBridge is registered
+              if (window.testBridge) {
+                console.log('[Test Page] testBridge object obtained.');
+                document.body.innerHTML += '<p style="color:green;">testBridge object obtained.</p>';
+              } else {
+                console.error('[Test Page] pyqtBridge object not found in channel.objects');
+                document.body.innerHTML += '<p style="color:red;">pyqtBridge object NOT FOUND.</p>';
+              }
+            });
+          } catch (e) {
+            console.error('[Test Page] Error during new QWebChannel():', e);
+            document.body.innerHTML += '<p style="color:red;">Error during new QWebChannel(): ' + e.message + '</p>';
+          }
+        } else {
+          attempt++;
+          if (attempt < maxAttempts) {
+            console.warn(`[Test Page] qt.webChannelTransport not ready (attempt ${attempt}/${maxAttempts}). Retrying...`);
+            setTimeout(attemptInit, 100);
+          } else {
+            console.error(`[Test Page] FAILED: qt.webChannelTransport not available after ${maxAttempts} attempts.`);
+            document.body.innerHTML += '<p style="color:red;">FAILED: qt.webChannelTransport not available.</p>';
+          }
+        }
+      }
+      attemptInit();
+    }
+    window.addEventListener('load', initTestChannel);
+  </script>
+</body>
+
+</html>

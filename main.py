@@ -1,5 +1,6 @@
 import sys
 import os
+os.environ["QTWEBENGINE_REMOTE_DEBUGGING"] = "9223" # 启用远程调试，端口9223
 
 # Add the 'src' directory to the Python path to allow absolute imports like 'from src.ui...'
 project_root = os.path.dirname(os.path.abspath(__file__))
