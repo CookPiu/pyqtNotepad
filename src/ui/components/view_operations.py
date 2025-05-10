@@ -29,6 +29,7 @@ class ViewOperations:
                 'activity_bar_visible': self.main_window.activity_bar_dock.isVisible(),
                 'toolbar_visible': self.main_window.toolbar.isVisible(),
                 'statusbar_visible': self.main_window.statusBar.isVisible(),
+                'ai_chat_visible': self.main_window.ai_chat_dock.isVisible() if hasattr(self.main_window, 'ai_chat_dock') else False,
                 'window_state': self.main_window.windowState() # Save normal/maximized state
             }
             # Hide docks and bars
@@ -36,6 +37,9 @@ class ViewOperations:
             self.main_window.activity_bar_dock.hide()
             self.main_window.toolbar.hide()
             self.main_window.statusBar.hide()
+            # Hide AI chat dock if it exists
+            if hasattr(self.main_window, 'ai_chat_dock'):
+                self.main_window.ai_chat_dock.hide()
             # Hide menu bar if it exists and is visible
             if self.main_window.menuBar(): self.main_window.menuBar().hide()
 
@@ -52,6 +56,11 @@ class ViewOperations:
             if self._pre_zen_state.get('activity_bar_visible', True): self.main_window.activity_bar_dock.show()
             if self._pre_zen_state.get('toolbar_visible', True): self.main_window.toolbar.show()
             if self._pre_zen_state.get('statusbar_visible', True): self.main_window.statusBar.show()
+            # Restore AI chat dock if it exists
+            if hasattr(self.main_window, 'ai_chat_dock') and self._pre_zen_state.get('ai_chat_visible', False):
+                self.main_window.ai_chat_dock.show()
+                if hasattr(self.main_window, 'toggle_ai_chat_action'):
+                    self.main_window.toggle_ai_chat_action.setChecked(True)
             if self.main_window.menuBar(): self.main_window.menuBar().setVisible(False) # Keep menu hidden by default
 
             # Restore previous window state (Normal or Maximized)

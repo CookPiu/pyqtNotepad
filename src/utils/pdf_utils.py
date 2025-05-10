@@ -8,6 +8,7 @@ import base64
 import mimetypes
 import re
 from bs4 import BeautifulSoup
+from .pdf2html_converter import PDF2HTMLConverter
 # import fitz # No longer needed for HTML conversion, but PdfViewerView still uses it for image preview
 
 def get_application_path():
@@ -21,18 +22,8 @@ def get_application_path():
     return application_path
 
 APPLICATION_ROOT = get_application_path()
-MUTOOL_DIR_NAME = "mupdf-1.25.2-windows" 
-MUTOOL_EXE_NAME = "mutool.exe"
-
-mutool_directory_path = os.path.join(APPLICATION_ROOT, MUTOOL_DIR_NAME)
-MUTOOL_PATH = os.path.join(mutool_directory_path, MUTOOL_EXE_NAME)
-
-if not os.path.exists(MUTOOL_PATH):
-    mutool_bin_path_attempt = os.path.join(mutool_directory_path, "bin", MUTOOL_EXE_NAME)
-    if os.path.exists(mutool_bin_path_attempt):
-        MUTOOL_PATH = mutool_bin_path_attempt
-    else:
-        pass # Error will be raised in extract_pdf_content if still not found
+# 不再使用mupdf，改为使用pdf2htmlEX
+# PDF2HTMLConverter类会在初始化时检查工具是否存在
 
 # Helper function to embed resources found in CSS url()
 def _embed_css_resource_url(match_obj, base_dir: pathlib.Path):
@@ -126,55 +117,33 @@ def _inline_resources(html_text: str, base_dir_str: str) -> str:
     return str(soup)
 
 def extract_pdf_content(pdf_path: str) -> str:
+    """将PDF文件转换为HTML内容
+    
+    此函数保持与原有接口兼容，但内部实现已从mupdf切换到pdf2htmlEX
+    
+    Args:
+        pdf_path: PDF文件路径
+        
+    Returns:
+        转换后的HTML内容字符串
+        
+    Raises:
+        FileNotFoundError: 当PDF文件或pdf2htmlEX工具不存在时
+        RuntimeError: 当转换过程中发生错误时
+    """
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF 文件未找到: {pdf_path}")
 
-    if not os.path.exists(MUTOOL_PATH):
-        primary_expected_path = os.path.join(APPLICATION_ROOT, MUTOOL_DIR_NAME, MUTOOL_EXE_NAME)
-        bin_expected_path = os.path.join(APPLICATION_ROOT, MUTOOL_DIR_NAME, "bin", MUTOOL_EXE_NAME)
-        error_msg = (
-            f"mutool.exe 未找到。\n"
-            f"尝试路径 1: {primary_expected_path}\n"
-            f"尝试路径 2: {bin_expected_path}\n"
-            f"请确保 MuPDF ('{MUTOOL_DIR_NAME}') 已放置在项目根目录下，"
-            f"并且 '{MUTOOL_EXE_NAME}' 在该目录中 (或其 'bin' 子目录中)。"
-        )
-        raise FileNotFoundError(error_msg)
-
-    tmp_output_dir = tempfile.mkdtemp(prefix="mutool_")
     try:
-        base_name = pathlib.Path(pdf_path).stem
-        output_html_file = pathlib.Path(tmp_output_dir, base_name + ".html")
-
-        cmd_final = [
-            MUTOOL_PATH,
-            "convert",
-            "-o", str(output_html_file),
-            "-F", "html",
-            "-O", tmp_output_dir, 
-            pdf_path
-        ]
+        # 使用PDF2HTMLConverter类进行转换
+        converter = PDF2HTMLConverter()
+        html_content = converter.convert_pdf_to_html(pdf_path)
         
-        process = subprocess.run(cmd_final, check=False, capture_output=True, text=False)
-
-        if process.returncode != 0:
-            stderr_output = process.stderr.decode('utf-8', errors='replace')[:1000]
-            raise RuntimeError(f"mutool 转换失败 (代码: {process.returncode}):\n{stderr_output}")
-
-        if not output_html_file.exists():
-            raise RuntimeError(f"mutool 执行成功，但未找到预期的输出文件: {output_html_file}")
-
-        html_content = output_html_file.read_text(encoding="utf-8")
-        
-        html_content = _inline_resources(html_content, tmp_output_dir)
-        
+        # 保持与原有功能一致，将pt单位转换为px
         html_content = re.sub(r'([\d.]+)pt', lambda m: f"{float(m.group(1)) * 96/72:.2f}px", html_content)
-
+        
         return html_content
 
-    except Exception as e: # Catch any broad error during processing
-        # Ensure specific errors from mutool or file ops are caught above if possible
+    except Exception as e:
+        # 捕获并重新抛出异常，保持与原有错误处理一致
         raise RuntimeError(f"处理 PDF 时发生意外错误: {e}") from e
-    finally:
-        if 'tmp_output_dir' in locals() and os.path.exists(tmp_output_dir):
-            shutil.rmtree(tmp_output_dir, ignore_errors=True)

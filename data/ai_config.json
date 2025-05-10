@@ -1,0 +1,16 @@
+{
+  "api_key": "sk-b0ad8711fa7547d8a778a7471367467a",
+  "selected_model": "deepseek-r1",
+  "models": {
+    "deepseek-v3": {
+      "name": "DeepSeek V3",
+      "api_base": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat"
+    },
+    "deepseek-r1": {
+      "name": "DeepSeek R1",
+      "api_base": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat-r1"
+    }
+  }
+}

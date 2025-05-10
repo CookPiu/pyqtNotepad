@@ -508,7 +508,7 @@ class FileOperations:
         
         try:
             if file_type == "html": # This path is less used now by open_file_from_path for existing HTML
-                editor_container = WangEditor() 
+                editor_container = EditableHtmlPreviewWidget() 
                 editor_container.setHtml(content)
                 actual_editor_part = editor_container 
             elif file_type == "markdown":

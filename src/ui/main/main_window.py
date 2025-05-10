@@ -14,6 +14,8 @@ from ..components.file_operations import FileOperations
 from ..components.edit_operations import EditOperations
 from ..components.view_operations import ViewOperations
 from ..components.ui_manager import UIManager
+from ..docks.optimized_ai_chat_dock import OptimizedAIChatDock  # 导入优化的AI聊天组件
+# PDF转换服务现在直接在open_pdf_conversion_dialog方法中导入
 
 # from ..atomic.editor.html_editor import HtmlEditor # No longer primary HTML editor
 from ..atomic.editor.wang_editor import WangEditor # Import WangEditor
@@ -74,6 +76,13 @@ class MainWindow(QMainWindow):
         self.create_menu_bar()
         self.create_toolbar() 
         
+        # 创建并添加AI聊天侧边栏
+        self.ai_chat_dock = OptimizedAIChatDock(self)
+        self.ai_chat_dock.setObjectName("AIChatDock")
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.ai_chat_dock)
+        # 初始隐藏AI聊天侧边栏
+        self.ai_chat_dock.hide()
+        
         self.ui_manager.apply_current_theme()
 
         if self.tab_widget is not None:
@@ -122,6 +131,9 @@ class MainWindow(QMainWindow):
         
         self.translate_action = QAction("翻译...", self, shortcut="Ctrl+Shift+T", toolTip="翻译", triggered=self.open_translation_dialog_wrapper, enabled=True)
         self.translate_selection_action = QAction("翻译选中内容", self, toolTip="翻译选中内容", triggered=self.translate_selection_wrapper, enabled=False)
+        
+        # PDF转HTML功能
+        self.pdf_to_html_action = QAction("PDF转HTML...", self, toolTip="将PDF转换为HTML", triggered=self.open_pdf_conversion_dialog)
 
         self.toggle_theme_action = QAction("切换主题", self, shortcut="Ctrl+T", toolTip="切换主题", triggered=self.toggle_theme_wrapper)
         self.zen_action = QAction("Zen Mode", self, checkable=True, shortcut="F11", triggered=self.toggle_zen_mode_wrapper, toolTip="Zen模式")
@@ -135,6 +147,9 @@ class MainWindow(QMainWindow):
         self.toggle_html_edit_mode_action = QAction("HTML 可视化编辑", self, checkable=True, toolTip="切换HTML可视化编辑模式 (预览窗口)", triggered=self.toggle_editable_html_edit_mode_wrapper, enabled=False) # For EditableHtmlPreviewWidget
         self.view_html_source_action = QAction("查看HTML源码", self, toolTip="查看当前预览HTML的源码", triggered=self.view_html_source_wrapper, enabled=False) # New action
 
+        # 创建AI聊天菜单项
+        self.toggle_ai_chat_action = QAction("AI对话助手", self, checkable=True, triggered=self.toggle_ai_chat_dock)
+
         self.about_action = QAction("关于", self, toolTip="关于", triggered=self.show_about_wrapper)
 
     def create_menu_bar(self):
@@ -146,10 +161,10 @@ class MainWindow(QMainWindow):
         edit_menu.addActions([self.undo_action, self.redo_action, self.cut_action, self.copy_action, self.paste_action, self.select_all_action, self.find_action, self.replace_action, self.translate_action, self.translate_selection_action])
 
         format_menu = menu_bar.addMenu("格式")
-        format_menu.addActions([self.font_action, self.color_action, self.insert_image_action, self.toggle_theme_action])
+        format_menu.addActions([self.font_action, self.color_action, self.insert_image_action, self.toggle_theme_action, self.pdf_to_html_action])
         
         view_menu = menu_bar.addMenu("视图")
-        view_menu.addActions([self.zen_action, self.toggle_markdown_preview_action, self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action, self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action])
+        view_menu.addActions([self.zen_action, self.toggle_markdown_preview_action, self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action, self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action, self.toggle_ai_chat_action])
         
         help_menu = menu_bar.addMenu("帮助")
         help_menu.addAction(self.about_action)
@@ -183,6 +198,8 @@ class MainWindow(QMainWindow):
         self.toolbar.addActions([self.undo_action, self.redo_action, self.find_action, self.translate_action])
         self.toolbar.addSeparator()
         self.toolbar.addActions([self.toggle_markdown_preview_action, self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action])
+        self.toolbar.addSeparator()
+        self.toolbar.addAction(self.toggle_ai_chat_action)
         
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -195,8 +212,8 @@ class MainWindow(QMainWindow):
         more_menu = QMenu(menu_btn)
         file_submenu = more_menu.addMenu("文件"); file_submenu.addActions([self.save_as_action, self.close_tab_action, self.exit_action])
         edit_submenu = more_menu.addMenu("编辑"); edit_submenu.addActions([self.cut_action, self.copy_action, self.paste_action, self.select_all_action, self.replace_action, self.translate_selection_action])
-        format_submenu = more_menu.addMenu("格式"); format_submenu.addActions([self.font_action, self.color_action, self.insert_image_action])
-        view_submenu = more_menu.addMenu("视图"); view_submenu.addActions([self.toggle_theme_action, self.zen_action, self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action])
+        format_submenu = more_menu.addMenu("格式"); format_submenu.addActions([self.font_action, self.color_action, self.insert_image_action, self.pdf_to_html_action])
+        view_submenu = more_menu.addMenu("视图"); view_submenu.addActions([self.toggle_theme_action, self.zen_action, self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action, self.toggle_ai_chat_action])
         help_submenu = more_menu.addMenu("帮助"); help_submenu.addAction(self.about_action)
         menu_btn.setMenu(more_menu)
         self.toolbar.addWidget(menu_btn)
@@ -250,7 +267,83 @@ class MainWindow(QMainWindow):
     def replace_text_wrapper(self): self.edit_operations.replace_text()
     def toggle_theme_wrapper(self): self.view_operations.toggle_theme()
     def toggle_zen_mode_wrapper(self, checked): self.view_operations.toggle_zen_mode(checked)
-    def show_about_wrapper(self): self.view_operations.show_about()
+    
+    def toggle_ai_chat_dock(self, checked=None):
+        """切换AI聊天侧边栏的显示状态"""
+        if checked is None:
+            checked = not self.ai_chat_dock.isVisible()
+        self.ai_chat_dock.setVisible(checked)
+        self.toggle_ai_chat_action.setChecked(checked)
+    def show_about_wrapper(self):
+        self.ui_manager.show_about_dialog()
+    
+    def open_pdf_conversion_dialog(self):
+        """打开PDF转HTML转换对话框，使用现有的PDF转换服务"""
+        from ...services.pdf_conversion_service import PDFConversionService
+        
+        # 选择PDF文件
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择PDF文件", "", "PDF文件 (*.pdf)"
+        )
+        
+        if not file_path:
+            return
+        
+        # 选择输出目录
+        dir_path = QFileDialog.getExistingDirectory(
+            self, "选择输出目录", "", QFileDialog.Option.ShowDirsOnly
+        )
+        
+        if not dir_path:
+            return
+        
+        # 设置输出HTML文件路径
+        html_filename = os.path.basename(file_path).replace(".pdf", ".html")
+        output_html_path = os.path.join(dir_path, html_filename)
+        
+        # 确认是否使用管理员权限
+        use_admin = QMessageBox.question(
+            self,
+            "PDF转HTML",
+            "是否使用管理员权限执行转换？\n(可能需要UAC确认)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        ) == QMessageBox.StandardButton.Yes
+        
+        # 显示进度对话框
+        progress_dialog = QMessageBox(self)
+        progress_dialog.setWindowTitle("PDF转HTML")
+        progress_dialog.setText("正在转换PDF文件，请稍候...")
+        progress_dialog.setStandardButtons(QMessageBox.StandardButton.NoButton)
+        progress_dialog.show()
+        QApplication.processEvents()
+        
+        try:
+            # 执行转换
+            service = PDFConversionService()
+            result = service.convert_pdf_to_html(file_path, output_html_path, use_admin)
+            
+            # 关闭进度对话框
+            progress_dialog.close()
+            
+            # 显示成功消息
+            result_msg = QMessageBox.information(
+                self, 
+                "转换成功", 
+                f"PDF已成功转换为HTML:\n{result}\n\n是否打开输出目录?", 
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if result_msg == QMessageBox.StandardButton.Yes:
+                # 打开输出目录
+                os.startfile(os.path.dirname(result))
+                
+        except Exception as e:
+            # 关闭进度对话框
+            progress_dialog.close()
+            
+            # 显示错误消息
+            QMessageBox.critical(self, "转换失败", f"PDF转换失败:\n{str(e)}")
     def open_translation_dialog_wrapper(self): 
         if hasattr(self, 'edit_operations'): self.edit_operations.open_translation_dialog()
     def translate_selection_wrapper(self):

@@ -262,17 +262,40 @@ class UIManager(QObject): # Inherit from QObject
         base_name = os.path.basename(pdf_path)
         untitled_name = f"{os.path.splitext(base_name)[0]}.html (源码)"
 
-        file_ops = getattr(self.main_window, 'file_operations', None)
-        if file_ops:
-            file_ops.add_editor_tab(
-                content=html_content,
-                file_path=None, 
-                file_type='html',
-                set_current=True,
-                untitled_name=untitled_name
-            )
-        else:
-            QMessageBox.critical(self.main_window, "内部错误", "FileOperations 未初始化。")
+        # 使用EditableHtmlPreviewWidget而不是WangEditor打开HTML内容
+        from ..views.editable_html_preview_widget import EditableHtmlPreviewWidget
+        
+        try:
+            # 获取当前活动的标签页控件
+            target_tab_widget = self.tab_widget
+            if not target_tab_widget and hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget:
+                target_tab_widget = self.main_window.tab_widget
+            
+            if not target_tab_widget:
+                QMessageBox.critical(self.main_window, "错误", "标签页管理器未能正确初始化或访问。")
+                self._clear_conversion_refs()
+                return
+            
+            # 创建基于WebEngine的HTML预览组件
+            html_viewer = EditableHtmlPreviewWidget()
+            html_viewer.setHtml(html_content)
+            
+            # 设置属性
+            html_viewer.setProperty("is_new", True)
+            html_viewer.setProperty("untitled_name", untitled_name)
+            
+            # 添加到标签页
+            index = target_tab_widget.addTab(html_viewer, untitled_name)
+            target_tab_widget.setCurrentIndex(index)
+            html_viewer.setFocus()
+            
+            # 设置初始未修改状态
+            if hasattr(self.main_window, 'on_editor_content_changed'):
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, lambda ed=html_viewer: self.main_window.on_editor_content_changed(ed, initially_modified=False))
+            
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "错误", f"创建HTML预览时出错: {e}")
         
         self._clear_conversion_refs()
 
