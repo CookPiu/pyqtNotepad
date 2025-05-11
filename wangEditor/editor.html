@@ -5,21 +5,39 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>wangEditor</title>
-  <link href="file:///f:/Project/pyqtNotepad/wangEditor/node_modules/@wangeditor/editor/dist/css/style.css"
+  <link href="node_modules/@wangeditor/editor/dist/css/style.css"
     rel="stylesheet" />
   <style>
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      /* Prevent scrollbars on body */
+    }
+
     #editor-wrapper {
-      border: 1px solid #ccc;
-      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+      box-sizing: border-box;
+      /* Include padding and border in element's total width and height */
     }
 
     #toolbar-container {
       border-bottom: 1px solid #ccc;
+      flex-shrink: 0;
+      /* Prevent toolbar from shrinking */
     }
 
     #editor-container {
-      height: 500px;
+      flex-grow: 1;
+      /* Allow editor to take remaining space */
       overflow-y: auto;
+      height: auto;
+      /* Override fixed height */
     }
 
     .hidden {
@@ -69,7 +87,7 @@
   <textarea id="html-output" class="hidden"></textarea>
   <div id="file-io-status" class="hidden"></div>
 
-  <script src="file:///f:/Project/pyqtNotepad/wangEditor/node_modules/@wangeditor/editor/dist/index.js"></script>
+  <script src="node_modules/@wangeditor/editor/dist/index.js"></script>
   <script>
     // 初始化WebChannel通信
     let pyqtBridge = null;

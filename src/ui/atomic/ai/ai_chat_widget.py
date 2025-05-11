@@ -206,6 +206,16 @@ class AIChatWidget(QWidget):
         
         self.load_config()
     
+    def set_input_text(self, text):
+        """设置输入文本并聚焦到输入框"""
+        if hasattr(self, 'input_text'):
+            self.input_text.setPlainText(text)
+            self.input_text.setFocus()
+            # 将光标移动到文本末尾
+            cursor = self.input_text.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self.input_text.setTextCursor(cursor)
+    
     def setup_ui(self):
         # 创建主布局
         main_layout = QVBoxLayout(self)

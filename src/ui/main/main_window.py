@@ -191,48 +191,116 @@ class MainWindow(QMainWindow):
 
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(20, 20))
-        self.toolbar.addAction(self.new_action)
-        self.toolbar.addAction(self.new_html_action)
-        self.toolbar.addAction(self.new_markdown_action)
         
-        open_menu_button = QToolButton(self)
-        open_menu_button.setText("打开")
-        open_menu_button.setToolTip("打开文件或文件夹")
-        open_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
-        open_options_menu = QMenu(open_menu_button)
-        open_options_menu.addAction(self.open_action)
-        open_options_menu.addAction(self.open_folder_action)
-        open_menu_button.setMenu(open_options_menu)
-        open_menu_button.setDefaultAction(self.open_action)
-        self.toolbar.addWidget(open_menu_button)
+        # ===== 文件类别 =====
+        file_btn = QToolButton(self)
+        file_btn.setText("文件")
+        file_btn.setToolTip("文件操作")
+        file_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        file_menu = QMenu(file_btn)
+        file_menu.addAction(self.new_action)
+        file_menu.addAction(self.new_html_action)
+        file_menu.addAction(self.new_markdown_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.open_action)
+        file_menu.addAction(self.open_folder_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.save_action)
+        file_menu.addAction(self.save_as_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.close_tab_action)
+        file_menu.addAction(self.exit_action)
+        file_btn.setMenu(file_menu)
+        self.toolbar.addWidget(file_btn)
         
-        self.toolbar.addAction(self.save_action)
-        self.toolbar.addSeparator()
-        self.toolbar.addActions([self.undo_action, self.redo_action, self.find_action, self.translate_action])
-        self.toolbar.addSeparator()
-        # Add new HTML actions to toolbar, remove/comment out old ones
-        self.toolbar.addActions([self.toggle_markdown_preview_action, 
-                                 self.toggle_html_view_action]) # Visual edit action (self.toggle_html_visual_edit_action) removed from toolbar
-        # self.toolbar.addActions([self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action]) # Old HTML actions
-        self.toolbar.addSeparator()
-        self.toolbar.addAction(self.toggle_ai_chat_action)
+        # ===== 编辑类别 =====
+        edit_btn = QToolButton(self)
+        edit_btn.setText("编辑")
+        edit_btn.setToolTip("编辑操作")
+        edit_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        edit_menu = QMenu(edit_btn)
+        edit_menu.addAction(self.undo_action)
+        edit_menu.addAction(self.redo_action)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.cut_action)
+        edit_menu.addAction(self.copy_action)
+        edit_menu.addAction(self.paste_action)
+        edit_menu.addAction(self.select_all_action)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.find_action)
+        edit_menu.addAction(self.replace_action)
+        edit_btn.setMenu(edit_menu)
+        self.toolbar.addWidget(edit_btn)
         
+        # ===== 格式类别 =====
+        format_btn = QToolButton(self)
+        format_btn.setText("格式")
+        format_btn.setToolTip("格式操作")
+        format_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        format_menu = QMenu(format_btn)
+        format_menu.addAction(self.font_action)
+        format_menu.addAction(self.color_action)
+        format_menu.addAction(self.insert_image_action)
+        format_menu.addSeparator()
+        format_menu.addAction(self.pdf_to_html_action)
+        format_btn.setMenu(format_menu)
+        self.toolbar.addWidget(format_btn)
+        
+        # ===== 翻译类别 =====
+        translate_btn = QToolButton(self)
+        translate_btn.setText("翻译")
+        translate_btn.setToolTip("翻译功能")
+        translate_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        translate_menu = QMenu(translate_btn)
+        translate_menu.addAction(self.translate_action)
+        translate_menu.addAction(self.translate_selection_action)
+        translate_btn.setMenu(translate_menu)
+        self.toolbar.addWidget(translate_btn)
+        
+        # ===== 视图类别 =====
+        view_btn = QToolButton(self)
+        view_btn.setText("视图")
+        view_btn.setToolTip("视图操作")
+        view_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        view_menu = QMenu(view_btn)
+        view_menu.addAction(self.toggle_markdown_preview_action)
+        view_menu.addAction(self.toggle_html_view_action)
+        view_menu.addSeparator()
+        view_menu.addAction(self.zoom_in_action)
+        view_menu.addAction(self.zoom_out_action)
+        view_menu.addAction(self.reset_zoom_action)
+        view_menu.addSeparator()
+        view_menu.addAction(self.toggle_theme_action)
+        view_menu.addAction(self.zen_action)
+        view_btn.setMenu(view_menu)
+        self.toolbar.addWidget(view_btn)
+        
+        # ===== 帮助类别 =====
+        help_btn = QToolButton(self)
+        help_btn.setText("帮助")
+        help_btn.setToolTip("帮助选项")
+        help_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        help_menu = QMenu(help_btn)
+        help_menu.addAction(self.toggle_ai_chat_action)
+        help_menu.addAction(self.about_action)
+        help_btn.setMenu(help_menu)
+        self.toolbar.addWidget(help_btn)
+        
+        # 添加弹性空间
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.toolbar.addWidget(spacer)
         
-        menu_btn = QToolButton()
-        menu_btn.setText("...")
-        menu_btn.setToolTip("更多选项")
-        menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        more_menu = QMenu(menu_btn)
-        file_submenu = more_menu.addMenu("文件"); file_submenu.addActions([self.save_as_action, self.close_tab_action, self.exit_action])
-        edit_submenu = more_menu.addMenu("编辑"); edit_submenu.addActions([self.cut_action, self.copy_action, self.paste_action, self.select_all_action, self.replace_action, self.translate_selection_action])
-        format_submenu = more_menu.addMenu("格式"); format_submenu.addActions([self.font_action, self.color_action, self.insert_image_action, self.pdf_to_html_action])
-        view_submenu = more_menu.addMenu("视图"); view_submenu.addActions([self.toggle_theme_action, self.zen_action, self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action, self.toggle_ai_chat_action])
-        help_submenu = more_menu.addMenu("帮助"); help_submenu.addAction(self.about_action)
-        menu_btn.setMenu(more_menu)
-        self.toolbar.addWidget(menu_btn)
+        # 添加常用操作的快捷按钮
+        self.toolbar.addAction(self.new_action)
+        self.toolbar.addAction(self.open_action)
+        self.toolbar.addAction(self.save_action)
+        
+        # 添加翻译工具和AI对话工具按钮
+        self.toolbar.addSeparator()
+        self.toolbar.addAction(self.translate_action)
+        self.toolbar.addAction(self.toggle_ai_chat_action)
+        
         self.addAction(self.zen_action)
 
     def new_file_wrapper(self):
@@ -531,7 +599,24 @@ class MainWindow(QMainWindow):
 
         is_markdown_tab = isinstance(current_tab_container_widget, MarkdownEditorWidget)
         is_html_view_container_tab = isinstance(current_tab_container_widget, HtmlViewContainer)
-        # is_wang_editor_tab = isinstance(current_tab_container_widget, WangEditor) # If WangEditor toggle is kept
+        is_wang_editor_tab = isinstance(current_tab_container_widget, WangEditor) # 保留WangEditor检查
+
+        # 检查当前标签页是否有修改，更新保存按钮状态
+        if current_tab_container_widget:
+            is_modified = False
+            # 检查是否有isModified方法
+            if hasattr(current_tab_container_widget, 'is_modified') and callable(current_tab_container_widget.is_modified):
+                is_modified = current_tab_container_widget.is_modified()
+            elif hasattr(current_tab_container_widget, 'isModified') and callable(current_tab_container_widget.isModified):
+                is_modified = current_tab_container_widget.isModified()
+            # 检查是否有document方法，并检查document是否被修改
+            elif hasattr(current_tab_container_widget, 'document') and callable(current_tab_container_widget.document):
+                doc = current_tab_container_widget.document()
+                if doc and hasattr(doc, 'isModified') and callable(doc.isModified):
+                    is_modified = doc.isModified()
+            
+            # 更新保存按钮状态
+            self.save_action.setEnabled(is_modified)
 
         self.toggle_markdown_preview_action.setEnabled(is_markdown_tab)
         if is_markdown_tab:
@@ -580,7 +665,6 @@ class MainWindow(QMainWindow):
             self.undo_action, self.redo_action, self.cut_action, self.copy_action, 
             self.select_all_action, self.font_action, self.color_action, 
             self.insert_image_action, self.find_action, self.replace_action, 
-            self.save_action, self.save_as_action, 
             self.translate_selection_action
         ]
         
@@ -597,17 +681,26 @@ class MainWindow(QMainWindow):
             elif 'video_player_view' in module_path: is_video_view = True
         
         is_markdown_tab = isinstance(current_tab_container, MarkdownEditorWidget)
-        # is_wang_editor_tab = isinstance(current_tab_container, WangEditor) # If WangEditor specific toggle is kept
+        is_wang_editor_tab = isinstance(current_tab_container, WangEditor) # 保留WangEditor检查
 
+        # 初始化所有编辑操作为禁用状态
         for action in all_editor_actions: action.setEnabled(False)
+        self.save_action.setEnabled(False) # 初始化保存按钮为禁用
+        self.save_as_action.setEnabled(False) # 初始化另存为按钮为禁用
         self.paste_action.setEnabled(False)
         self.close_tab_action.setEnabled(self.tab_widget.count() > 0 if self.tab_widget else False)
+        
+        # 如果没有打开的标签页，直接返回
+        if not current_tab_container:
+            return
+            
+        # 对于所有类型的编辑器，都可以使用另存为功能
+        self.save_as_action.setEnabled(True)
         
         # Handle HtmlViewContainer
         if is_html_view_container:
             is_modified = current_tab_container.is_modified()
             self.save_action.setEnabled(is_modified)
-            self.save_as_action.setEnabled(True) # Can always save as
 
             self.toggle_html_view_action.setEnabled(True) # Main toggle for HTML container
             # Visual edit action is removed
@@ -652,11 +745,22 @@ class MainWindow(QMainWindow):
             self.translate_selection_action.setEnabled(has_selection)
             self.select_all_action.setEnabled(True)
             self.find_action.setEnabled(True); self.replace_action.setEnabled(True)
-            self.save_as_action.setEnabled(is_writable)
             self.font_action.setEnabled(True); self.color_action.setEnabled(True)
             # insert_image_action is usually for rich text, disable for plain/code. WangEditor handles its own.
             self.insert_image_action.setEnabled(isinstance(current_widget, QTextEdit) and not isinstance(current_widget, _InternalTextEdit))
 
+        # 特殊处理WangEditor
+        elif is_wang_editor_tab:
+            # WangEditor有自己的修改状态跟踪
+            is_modified = False
+            if hasattr(current_tab_container, 'isModified') and callable(current_tab_container.isModified):
+                is_modified = current_tab_container.isModified()
+            self.save_action.setEnabled(is_modified)
+            
+            # 启用基本编辑功能
+            self.select_all_action.setEnabled(True)
+            self.find_action.setEnabled(True)
+            self.replace_action.setEnabled(True)
 
         # Paste action
         clipboard = QApplication.clipboard()

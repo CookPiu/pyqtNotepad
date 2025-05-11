@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QLabel, QStackedWidget, QMenu, QSizePolicy
 )
 from PyQt6.QtGui import QIcon, QAction, QColor, QPalette, QFont, QScreen, QContextMenuEvent
-from PyQt6.QtCore import Qt, QSize, QPoint, QRect, pyqtSignal, QSettings, QSignalBlocker
+from PyQt6.QtCore import Qt, QSize, QPoint, QRect, pyqtSignal, QSettings, QSignalBlocker, QTimer
 
 # Correct relative import from views to core
 from ..core.base_widget import BaseWidget
@@ -100,7 +100,8 @@ class StickyNote(QWidget):
         self.text_edit.setPlainText(self._initial_content)
         self.text_edit.setFrameStyle(0) # No frame
         self.text_edit.setFont(QFont("Arial", 11)) # Slightly smaller font
-        self.text_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        self.text_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.text_edit.customContextMenuRequested.connect(self._show_context_menu)
         self.text_edit.textChanged.connect(self._on_data_changed) # Connect text changes
         main_layout.addWidget(self.text_edit, 1) # Text edit takes expanding space
 
@@ -235,22 +236,137 @@ class StickyNote(QWidget):
             event.ignore()
 
     def resizeEvent(self, event):
-        """Emit data change on resize."""
-        super().resizeEvent(event)
-        # Use a timer to avoid emitting too frequently during resize
-        if not hasattr(self, '_resize_timer'):
-             self._resize_timer = QTimer(self)
-             self._resize_timer.setSingleShot(True)
-             self._resize_timer.timeout.connect(self._on_data_changed)
-        self._resize_timer.start(500) # Emit after 500ms of no resizing
-
-    def closeEvent(self, event):
-        """Handles the close event, emits closed signal."""
+        """Emit data change on resize with error handling."""
         try:
-            self.closed.emit(self.note_id)
+            super().resizeEvent(event)
+            # 使用计时器避免调整大小时过于频繁地发出信号
+            try:
+                if not hasattr(self, '_resize_timer'):
+                    self._resize_timer = QTimer(self)
+                    self._resize_timer.setSingleShot(True)
+                    self._resize_timer.timeout.connect(self._on_data_changed)
+                self._resize_timer.start(500) # 500毫秒无调整后发出信号
+            except Exception as e:
+                print(f"设置调整大小计时器时出错: {e}")
+                # 如果计时器失败，直接发出数据变更信号
+                self._on_data_changed()
         except Exception as e:
-            print(f"Error emitting closed signal for note {self.note_id}: {e}")
-        super().closeEvent(event)
+            print(f"处理便签调整大小事件时出错: {e}")
+
+    def _show_context_menu(self, position):
+        """显示自定义右键菜单"""
+        try:
+            # 只有当有文本被选中时才显示菜单
+            if not self.text_edit.textCursor().hasSelection():
+                return
+                
+            context_menu = QMenu(self)
+            
+            # 添加发送到翻译工具的选项
+            translate_action = context_menu.addAction("发送到翻译工具")
+            translate_action.triggered.connect(self._send_to_translator)
+            
+            # 添加发送到AI对话的选项
+            ai_action = context_menu.addAction("发送到AI对话")
+            ai_action.triggered.connect(self._send_to_ai_chat)
+            
+            # 显示菜单
+            context_menu.exec(self.text_edit.mapToGlobal(position))
+        except Exception as e:
+            print(f"显示上下文菜单时出错: {e}")
+    
+    def _send_to_translator(self):
+        """将选中文本发送到翻译工具"""
+        try:
+            selected_text = self.text_edit.textCursor().selectedText()
+            if not selected_text:
+                return
+                
+            # 尝试导入并使用翻译对话框
+            try:
+                from ...dialogs.translation_dialog import TranslationDialog
+                dialog = TranslationDialog(self)
+                dialog.set_source_text(selected_text)
+                dialog.show()
+            except ImportError:
+                # 备选方案：尝试使用翻译面板
+                try:
+                    from ...docks.translation_dock import TranslationDock
+                    # 获取主窗口
+                    main_window = QApplication.activeWindow()
+                    if main_window:
+                        # 查找或创建翻译面板
+                        translation_dock = None
+                        for dock in main_window.findChildren(TranslationDock):
+                            translation_dock = dock
+                            break
+                            
+                        if translation_dock:
+                            translation_dock.set_source_text(selected_text)
+                            translation_dock.show()
+                            translation_dock.raise_()
+                except ImportError:
+                    QMessageBox.warning(self, "功能不可用", "翻译功能不可用，请确保翻译组件已正确安装。")
+        except Exception as e:
+            print(f"发送文本到翻译工具时出错: {e}")
+    
+    def _send_to_ai_chat(self):
+        """将选中文本发送到AI对话"""
+        try:
+            selected_text = self.text_edit.textCursor().selectedText()
+            if not selected_text:
+                return
+                
+            # 尝试导入并使用AI对话组件
+            try:
+                from ...atomic.ai.ai_chat_widget import AIChatWidget
+                # 获取主窗口
+                main_window = QApplication.activeWindow()
+                if main_window:
+                    # 查找或创建AI对话组件
+                    ai_chat = None
+                    for widget in main_window.findChildren(AIChatWidget):
+                        ai_chat = widget
+                        break
+                        
+                    if ai_chat:
+                        ai_chat.set_input_text(selected_text)
+                        ai_chat.show()
+                        ai_chat.raise_()
+                    else:
+                        QMessageBox.warning(self, "组件未找到", "未找到AI对话组件，请确保AI对话功能已启用。")
+            except ImportError:
+                QMessageBox.warning(self, "功能不可用", "AI对话功能不可用，请确保AI组件已正确安装。")
+        except Exception as e:
+            print(f"发送文本到AI对话时出错: {e}")
+    
+    def closeEvent(self, event):
+        """Handles the close event, emits closed signal with improved error handling."""
+        try:
+            # 尝试发出关闭信号
+            try:
+                self.closed.emit(self.note_id)
+            except Exception as e:
+                print(f"便签 {self.note_id} 发出关闭信号时出错: {e}")
+                # 即使信号发送失败，仍然继续关闭窗口
+            
+            # 保存当前数据作为最后的尝试
+            try:
+                # 发出最后的数据变更信号，确保数据被保存
+                self._on_data_changed()
+            except Exception as e:
+                print(f"便签关闭前保存数据时出错: {e}")
+            
+            # 调用父类的关闭事件处理
+            super().closeEvent(event)
+        except Exception as e:
+            print(f"处理便签关闭事件时出错: {e}")
+            # 确保窗口被关闭，即使出现错误
+            try:
+                super().closeEvent(event)
+            except:
+                # 如果父类的关闭事件也失败，强制接受事件
+                event.accept()
 
 
 # --- Notes List Widget (Internal Helper) ---
@@ -381,24 +497,23 @@ class StickyNotesView(BaseWidget):
     继承自 BaseWidget。
     """
     def __init__(self, parent=None):
-        self.notes_data: list[dict] = [] # Stores data for all notes
+        # 先初始化基本属性
         self.active_notes: dict[str, StickyNote] = {} # {note_id: StickyNote widget instance}
-        self._data_file_path = self._get_data_file_path()
-        self.load_notes()
-        super().__init__(parent) # Calls _init_ui, _connect_signals, _apply_theme
-
-    def _get_data_file_path(self):
-        """Determines the path for the notes data file."""
-        # Assumes this file is in src/ui/views
+        
+        # 使用数据管理器处理数据逻辑
         try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.abspath(os.path.join(current_dir, "..", "..")) # Up two levels
-            data_dir = os.path.join(project_root, "data")
-            os.makedirs(data_dir, exist_ok=True)
-            return os.path.join(data_dir, "notes.json")
+            from ...data.data_manager import StickyNoteDataManager
+            self.data_manager = StickyNoteDataManager()
         except Exception as e:
-            print(f"Error determining notes data file path: {e}")
-            return os.path.join(os.path.dirname(os.path.abspath(__file__)), "notes.json")
+            print(f"初始化便签数据管理器时出错: {e}")
+            # 创建一个空的数据管理器作为后备
+            from ...data.data_manager import DataManager
+            self.data_manager = DataManager("sticky_notes.json")
+            
+        # 调用父类初始化 (会调用 _init_ui, _connect_signals, _apply_theme)
+        super().__init__(parent)
+
+    # 数据文件路径现在由数据管理器处理
 
     def _init_ui(self):
         """初始化主视图 UI"""
@@ -433,141 +548,256 @@ class StickyNotesView(BaseWidget):
 
 
     # --- Data Persistence ---
-    def load_notes(self):
-        """Loads notes data from the JSON file."""
-        if not os.path.exists(self._data_file_path):
-            self.notes_data = []
-            return
-        try:
-            with open(self._data_file_path, "r", encoding="utf-8") as f:
-                self.notes_data = json.load(f)
-                # Basic validation (ensure it's a list of dicts)
-                if not isinstance(self.notes_data, list):
-                     print("Warning: notes.json does not contain a list. Resetting.")
-                     self.notes_data = []
-                self.notes_data = [n for n in self.notes_data if isinstance(n, dict) and 'id' in n]
-        except (json.JSONDecodeError, IOError, Exception) as e:
-            QMessageBox.warning(self, "加载便签失败", f"无法加载便签: {e}")
-            self.notes_data = []
-
-    def save_notes(self):
-        """Saves the current state of notes_data to the JSON file."""
-        try:
-            # Ensure data directory exists
-            os.makedirs(os.path.dirname(self._data_file_path), exist_ok=True)
-            with open(self._data_file_path, "w", encoding="utf-8") as f:
-                json.dump(self.notes_data, f, indent=2, ensure_ascii=False)
-        except (IOError, Exception) as e:
-            QMessageBox.warning(self, "保存便签失败", f"无法保存便签: {e}")
+    # 数据加载和保存现在由数据管理器处理
 
     def update_notes_list_display(self):
-        """Updates the list widget display."""
-        self.notes_list_widget.update_note_list(self.notes_data)
+        """Updates the list widget display with error handling."""
+        try:
+            notes_data = self.data_manager.get_data()
+            self.notes_list_widget.update_note_list(notes_data)
+        except Exception as e:
+            print(f"更新便签列表显示时出错: {e}")
+            # 显示空列表作为后备
+            self.notes_list_widget.update_note_list([])
 
     # --- Note Management ---
     def create_new_note(self):
-        """Creates a new sticky note window and data entry."""
-        new_note_widget = StickyNote(parent=None) # Create as top-level window
-        new_note_widget.closed.connect(self._on_note_closed)
-        new_note_widget.data_changed.connect(self._on_note_data_changed)
+        """Creates a new sticky note window and data entry with error handling."""
+        try:
+            # 创建新便签窗口
+            new_note_widget = StickyNote(parent=None) # Create as top-level window
+            
+            # 连接信号
+            try:
+                new_note_widget.closed.connect(self._on_note_closed)
+                new_note_widget.data_changed.connect(self._on_note_data_changed)
+            except Exception as e:
+                print(f"连接便签信号时出错: {e}")
+                # 如果信号连接失败，仍然继续，但可能无法保存数据
 
-        note_id = new_note_widget.note_id
-        self.active_notes[note_id] = new_note_widget
+            # 获取便签ID并保存到活动便签字典
+            note_id = new_note_widget.note_id
+            self.active_notes[note_id] = new_note_widget
 
-        # Add new note data to list and save
-        new_note_data = new_note_widget.get_data()
-        self.notes_data.append(new_note_data)
-        self.save_notes()
-        self.update_notes_list_display()
+            # 添加新便签数据并保存
+            try:
+                new_note_data = new_note_widget.get_data()
+                save_success = self.data_manager.add_item(new_note_data)
+                if not save_success:
+                    print(f"警告: 便签数据保存失败，ID: {note_id}")
+            except Exception as e:
+                print(f"保存便签数据时出错: {e}")
+                # 即使保存失败，仍然显示便签窗口
+            
+            # 更新便签列表显示
+            self.update_notes_list_display()
 
-        new_note_widget.show()
+            # 显示便签窗口
+            new_note_widget.show()
+            
+        except Exception as e:
+            print(f"创建新便签时出错: {e}")
+            # 可以在这里添加用户提示，例如显示错误消息框
+            try:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "创建便签失败", f"无法创建新便签: {e}")
+            except:
+                # 如果连消息框都无法显示，至少在控制台记录错误
+                print("无法显示错误消息框")
 
     def open_note_from_data(self, note_data: dict):
-        """Opens an existing note window from its data."""
-        note_id = note_data.get("id")
-        if not note_id: return
+        """Opens an existing note window from its data with error handling."""
+        try:
+            # 验证便签数据
+            if not isinstance(note_data, dict):
+                print(f"警告: 无效的便签数据格式: {type(note_data)}")
+                return
+                
+            note_id = note_data.get("id")
+            if not note_id:
+                print("警告: 便签数据缺少ID字段")
+                return
 
-        # If already open, just activate it
-        if note_id in self.active_notes:
-            note_widget = self.active_notes[note_id]
-            if note_widget:
-                 note_widget.show()
-                 note_widget.activateWindow()
-                 note_widget.raise_()
-                 return
-            else:
-                 # Reference exists but widget might have been deleted unexpectedly
-                 del self.active_notes[note_id]
+            # 如果便签已经打开，只需激活它
+            if note_id in self.active_notes:
+                try:
+                    note_widget = self.active_notes[note_id]
+                    if note_widget and not note_widget.isHidden():
+                        note_widget.show()
+                        note_widget.activateWindow()
+                        note_widget.raise_()
+                        return
+                    else:
+                        # 引用存在但窗口可能已被意外删除
+                        print(f"便签窗口 {note_id} 引用存在但无效，将重新创建")
+                        del self.active_notes[note_id]
+                except Exception as e:
+                    print(f"激活现有便签时出错: {e}")
+                    # 删除无效引用并继续创建新窗口
+                    del self.active_notes[note_id]
 
-        # Create and show the note window
-        note_widget = StickyNote(
-            note_id=note_id,
-            content=note_data.get("content", ""),
-            color=note_data.get("color", "#ffff99"),
-            geometry=note_data.get("geometry"),
-            parent=None # Create as top-level window
-        )
-        note_widget.closed.connect(self._on_note_closed)
-        note_widget.data_changed.connect(self._on_note_data_changed)
-        self.active_notes[note_id] = note_widget
-        note_widget.show()
+            # 创建并显示便签窗口
+            try:
+                note_widget = StickyNote(
+                    note_id=note_id,
+                    content=note_data.get("content", ""),
+                    color=note_data.get("color", "#ffff99"),
+                    geometry=note_data.get("geometry"),
+                    parent=None # 创建为顶级窗口
+                )
+                
+                # 连接信号
+                try:
+                    note_widget.closed.connect(self._on_note_closed)
+                    note_widget.data_changed.connect(self._on_note_data_changed)
+                except Exception as e:
+                    print(f"连接便签信号时出错: {e}")
+                    # 如果信号连接失败，仍然继续，但可能无法保存数据
+                
+                # 保存到活动便签字典并显示
+                self.active_notes[note_id] = note_widget
+                note_widget.show()
+                
+            except Exception as e:
+                print(f"创建便签窗口时出错: {e}")
+                # 可以在这里添加用户提示
+                
+        except Exception as e:
+            print(f"打开便签时出错: {e}")
+            # 记录错误但不中断程序流程
 
     def _on_note_closed(self, note_id: str):
-        """Handles the closed signal from a StickyNote window."""
-        if note_id in self.active_notes:
-            # Data should have been saved via data_changed or just before closing
-            # Remove from active dictionary
-            del self.active_notes[note_id]
-            # No need to save here, saving happens on data change or main window close
-            print(f"Note {note_id} closed and removed from active list.")
-        self.update_notes_list_display() # Refresh list in case state changed visually
+        """Handles the closed signal from a StickyNote window with error handling."""
+        try:
+            if not note_id:
+                print("警告: 收到空的便签ID关闭信号")
+                return
+                
+            if note_id in self.active_notes:
+                # 数据应该已经通过data_changed信号或关闭前保存
+                # 从活动字典中移除
+                try:
+                    del self.active_notes[note_id]
+                    print(f"便签 {note_id} 已关闭并从活动列表中移除。")
+                except Exception as e:
+                    print(f"从活动列表移除便签时出错: {e}")
+            
+            # 刷新列表以防状态视觉上发生变化
+            self.update_notes_list_display()
+            
+        except Exception as e:
+            print(f"处理便签关闭信号时出错: {e}")
+            # 尝试更新列表显示，即使出错
+            try:
+                self.update_notes_list_display()
+            except:
+                pass
 
     def _on_note_data_changed(self, note_data: dict):
-        """Handles data changes from an active StickyNote window."""
-        note_id = note_data.get("id")
-        if not note_id: return
+        """Handles data changes from an active StickyNote window with error handling."""
+        try:
+            # 验证便签数据
+            if not isinstance(note_data, dict):
+                print(f"警告: 无效的便签数据格式: {type(note_data)}")
+                return
+                
+            note_id = note_data.get("id")
+            if not note_id:
+                print("警告: 便签数据缺少ID字段")
+                return
 
-        # Update the data in the main list
-        found = False
-        for i, existing_data in enumerate(self.notes_data):
-            if existing_data.get("id") == note_id:
-                self.notes_data[i] = note_data # Replace with new data
-                found = True
-                break
-        if not found:
-            # This shouldn't happen if the note was created correctly
-            print(f"Warning: Data changed for note ID {note_id}, but not found in main list. Appending.")
-            self.notes_data.append(note_data)
-
-        # Save changes and update list display
-        self.save_notes()
-        self.update_notes_list_display()
+            # 使用数据管理器更新数据
+            try:
+                save_success = self.data_manager.update_item(note_id, note_data)
+                if not save_success:
+                    print(f"警告: 便签数据更新失败，ID: {note_id}")
+            except Exception as e:
+                print(f"更新便签数据时出错: {e}")
+                # 即使保存失败，仍然继续更新UI
+            
+            # 更新便签列表显示
+            self.update_notes_list_display()
+            
+        except Exception as e:
+            print(f"处理便签数据变更时出错: {e}")
+            # 尝试更新列表显示，即使出错
+            try:
+                self.update_notes_list_display()
+            except:
+                pass
 
     # --- Global Actions (Could be triggered externally) ---
     def show_all_notes(self):
-        """Opens windows for all notes in the data list."""
-        # Close existing ones first to ensure they reopen with latest data/position
-        self.hide_all_notes()
-        # Reopen all
-        for note_data in self.notes_data:
-            self.open_note_from_data(note_data)
+        """Opens windows for all notes in the data list with error handling."""
+        try:
+            # 关闭现有便签，确保它们以最新的数据/位置重新打开
+            self.hide_all_notes()
+            
+            # 重新打开所有便签
+            try:
+                notes_data = self.data_manager.get_data()
+                for note_data in notes_data:
+                    try:
+                        self.open_note_from_data(note_data)
+                    except Exception as e:
+                        print(f"打开便签 {note_data.get('id', '未知ID')} 时出错: {e}")
+                        # 继续处理下一个便签
+            except Exception as e:
+                print(f"获取便签数据时出错: {e}")
+                # 如果无法获取数据，显示错误消息
+                try:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, "便签加载失败", "无法加载便签数据，请检查数据文件。")
+                except:
+                    print("无法显示错误消息框")
+        except Exception as e:
+            print(f"显示所有便签时出错: {e}")
 
     def hide_all_notes(self):
-        """Closes all currently open sticky note windows."""
-        # Iterate over a copy of keys as closing modifies the dictionary
-        for note_id in list(self.active_notes.keys()):
-            note_widget = self.active_notes.get(note_id)
-            if note_widget:
-                # Block signals temporarily to avoid redundant saves during mass close
-                # with QSignalBlocker(note_widget): # Might cause issues if closeEvent needs signals
-                note_widget.close() # This will trigger _on_note_closed
+        """Closes all currently open sticky note windows with error handling."""
+        try:
+            # 遍历键的副本，因为关闭会修改字典
+            note_ids = list(self.active_notes.keys())
+            for note_id in note_ids:
+                try:
+                    note_widget = self.active_notes.get(note_id)
+                    if note_widget and not note_widget.isHidden():
+                        # 关闭便签窗口，这将触发 _on_note_closed
+                        note_widget.close()
+                except Exception as e:
+                    print(f"关闭便签 {note_id} 时出错: {e}")
+                    # 如果关闭失败，从活动列表中移除
+                    try:
+                        if note_id in self.active_notes:
+                            del self.active_notes[note_id]
+                    except:
+                        pass
+        except Exception as e:
+            print(f"隐藏所有便签时出错: {e}")
 
     # --- Cleanup ---
     def cleanup(self):
-        """Called when the view is being destroyed or closed."""
-        print("StickyNotesView cleanup called.")
-        self.hide_all_notes() # Ensure all notes are closed and potentially save state
-        self.save_notes() # Final save
+        """Called when the view is being destroyed or closed with error handling."""
+        try:
+            print("StickyNotesView cleanup called.")
+            self.hide_all_notes()
+            
+            # 确保所有活动便签都被清理
+            try:
+                if self.active_notes:
+                    print(f"警告: 清理后仍有 {len(self.active_notes)} 个活动便签引用")
+                    self.active_notes.clear()
+            except Exception as e:
+                print(f"清理活动便签引用时出错: {e}")
+                
+        except Exception as e:
+            print(f"便签视图清理时出错: {e}")
+            # 尝试强制清理
+            try:
+                self.active_notes.clear()
+            except:
+                pass # Ensure all notes are closed and potentially save state
+        # 数据已经由数据管理器保存，无需额外操作 # Final save
 
     # Override closeEvent if this widget itself can be closed independently
     # def closeEvent(self, event):

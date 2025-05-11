@@ -367,22 +367,12 @@ class TodoItemDialog(QDialog):
 class TodoListView(BaseWidget):
     """待办事项管理视图"""
     def __init__(self, parent=None):
-        self.todo_items_data: list[dict] = [] # Store raw data dicts
-        self._data_file_path = self._get_data_file_path()
-        self.load_todo_items()
+        # 使用数据管理器处理数据逻辑
+        from ...data.data_manager import TodoDataManager
+        self.data_manager = TodoDataManager()
         super().__init__(parent)
 
-    def _get_data_file_path(self):
-        """Determines the path for the todo data file."""
-        try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
-            data_dir = os.path.join(project_root, "data")
-            os.makedirs(data_dir, exist_ok=True)
-            return os.path.join(data_dir, "todo.json")
-        except Exception as e:
-            print(f"Error determining todo data file path: {e}")
-            return os.path.join(os.path.dirname(os.path.abspath(__file__)), "todo.json")
+    # 数据文件路径现在由数据管理器处理
 
     def _init_ui(self):
         """初始化主视图 UI"""
@@ -472,29 +462,7 @@ class TodoListView(BaseWidget):
 
 
     # --- Data Handling ---
-    def load_todo_items(self):
-        """Loads todo data from the JSON file."""
-        if not os.path.exists(self._data_file_path):
-            self.todo_items_data = []
-            return
-        try:
-            with open(self._data_file_path, "r", encoding="utf-8") as f:
-                self.todo_items_data = json.load(f)
-                if not isinstance(self.todo_items_data, list): self.todo_items_data = []
-                # Validate data structure minimally
-                self.todo_items_data = [d for d in self.todo_items_data if isinstance(d, dict) and 'id' in d]
-        except (json.JSONDecodeError, IOError, Exception) as e:
-            QMessageBox.warning(self, "加载待办事项失败", f"无法加载: {e}")
-            self.todo_items_data = []
-
-    def save_todo_items(self):
-        """Saves the current todo_items_data list to the JSON file."""
-        try:
-            os.makedirs(os.path.dirname(self._data_file_path), exist_ok=True)
-            with open(self._data_file_path, "w", encoding="utf-8") as f:
-                json.dump(self.todo_items_data, f, ensure_ascii=False, indent=2)
-        except (IOError, Exception) as e:
-            QMessageBox.warning(self, "保存待办事项失败", f"无法保存: {e}")
+    # 数据加载和保存现在由数据管理器处理
 
     # --- UI Refresh ---
     def refresh_display_list(self):
@@ -502,26 +470,9 @@ class TodoListView(BaseWidget):
         status_filter = self.filter_combo.currentText()
         priority_filter = self.priority_filter_combo.currentText()
 
-        # Filter
-        filtered_data = []
-        for item_data in self.todo_items_data:
-            # Status filter
-            show = True
-            if status_filter == "未完成" and item_data.get("completed", False): show = False
-            if status_filter == "已完成" and not item_data.get("completed", False): show = False
-            # Priority filter
-            if priority_filter != "全部" and item_data.get("priority", "中") != priority_filter: show = False
-            if show: filtered_data.append(item_data)
-
-        # Sort
-        def sort_key(item_data):
-            prio_val = {"高": 0, "中": 1, "低": 2}.get(item_data.get("priority", "中"), 1)
-            due_date = item_data.get("due_date", "9999-99-99") or "9999-99-99"
-            completed = 1 if item_data.get("completed", False) else 0
-            created = item_data.get("created_at", "")
-            return (completed, due_date, prio_val, created) # Sort by completed, due date, priority, created
-
-        sorted_data = sorted(filtered_data, key=sort_key)
+        # 使用数据管理器过滤和排序数据
+        filtered_data = self.data_manager.filter_items(status_filter, priority_filter)
+        sorted_data = self.data_manager.sort_items(filtered_data)
 
         # Display
         self.todo_list_widget.clear()
@@ -561,8 +512,7 @@ class TodoListView(BaseWidget):
         # dialog._apply_dialog_styles(is_dark=...) # Apply theme
         if dialog.exec():
             new_data = dialog.get_todo_data()
-            self.todo_items_data.append(new_data)
-            self.save_todo_items()
+            self.data_manager.add_item(new_data)
             self.refresh_display_list()
 
     def quick_add_item(self):
@@ -570,30 +520,29 @@ class TodoListView(BaseWidget):
         title = self.quick_add_edit.text().strip()
         if not title: return
         new_item = TodoItem(title=title) # Create object with default values
-        self.todo_items_data.append(new_item.to_dict()) # Add data dict to list
-        self.save_todo_items()
+        self.data_manager.add_item(new_item.to_dict()) # 使用数据管理器添加
         self.refresh_display_list()
         self.quick_add_edit.clear()
 
     def _handle_item_status_change(self, item_id: str, completed: bool):
         """Updates the completion status in the data list and saves."""
-        for i, item_data in enumerate(self.todo_items_data):
-            if item_data.get("id") == item_id:
-                self.todo_items_data[i]["completed"] = completed
-                self.save_todo_items()
-                # Find the widget in the list and update its style immediately
-                list_item = self._find_list_item_by_id(item_id)
-                if list_item:
-                     widget = self.todo_list_widget.itemWidget(list_item)
-                     if isinstance(widget, TodoItemWidget):
-                         widget._update_dynamic_content() # Update styles based on new status
-                # Optionally re-filter/re-sort if status change affects visibility/order
-                # self.refresh_display_list() # Can be slow if list is long
-                break
+        item_data = self.data_manager.get_item_by_id(item_id)
+        if item_data:
+            item_data["completed"] = completed
+            self.data_manager.update_item(item_id, item_data)
+            
+            # Find the widget in the list and update its style immediately
+            list_item = self._find_list_item_by_id(item_id)
+            if list_item:
+                widget = self.todo_list_widget.itemWidget(list_item)
+                if isinstance(widget, TodoItemWidget):
+                    widget._update_dynamic_content() # Update styles based on new status
+            # Optionally re-filter/re-sort if status change affects visibility/order
+            # self.refresh_display_list() # Can be slow if list is long
 
     def _handle_item_edit(self, item_id: str):
         """Opens the edit dialog for the specified item."""
-        item_data = next((d for d in self.todo_items_data if d.get("id") == item_id), None)
+        item_data = self.data_manager.get_item_by_id(item_id)
         if not item_data: return
         todo_item_obj = TodoItem.from_dict(item_data) # Create object for dialog
 
@@ -601,20 +550,12 @@ class TodoListView(BaseWidget):
         # dialog._apply_dialog_styles(is_dark=...) # Apply theme
         if dialog.exec():
             updated_data = dialog.get_todo_data()
-            # Find and update the data in the list
-            for i, data in enumerate(self.todo_items_data):
-                if data.get("id") == item_id:
-                    self.todo_items_data[i] = updated_data
-                    self.save_todo_items()
-                    self.refresh_display_list() # Refresh the whole list
-                    break
+            self.data_manager.update_item(item_id, updated_data)
+            self.refresh_display_list() # Refresh the whole list
 
     def _handle_item_delete(self, item_id: str):
         """Deletes the item with the specified ID."""
-        initial_len = len(self.todo_items_data)
-        self.todo_items_data = [d for d in self.todo_items_data if d.get("id") != item_id]
-        if len(self.todo_items_data) < initial_len:
-            self.save_todo_items()
+        if self.data_manager.delete_item(item_id):
             self.refresh_display_list()
 
     def _find_list_item_by_id(self, item_id: str) -> QListWidgetItem | None:
@@ -628,7 +569,8 @@ class TodoListView(BaseWidget):
     # --- Cleanup ---
     def cleanup(self):
         """Called when the view is closing."""
-        self.save_todo_items() # Ensure data is saved
+        # 数据已经由数据管理器保存，无需额外操作
+        pass # Ensure data is saved
 
     # def closeEvent(self, event): # If needed
     #     self.cleanup()

@@ -201,6 +201,30 @@ class UIInitializer:
          files_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
          self.main_window.activity_bar_toolbar.addWidget(files_btn)
          self.main_window.toggle_sidebar_button = files_btn 
+         
+         # 添加小工具按钮
+         tools_btn = QToolButton(self.main_window.activity_bar_toolbar)
+         tools_btn.setText("工具")
+         tools_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+         tools_btn.setToolTip("小工具集合 (计算器/定时器/语音识别)")
+         tools_btn.setCheckable(True)
+         tools_btn.setChecked(False)
+         tools_btn.clicked.connect(self._toggle_mini_tools_dock)
+         tools_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+         self.main_window.activity_bar_toolbar.addWidget(tools_btn)
+         self.main_window.toggle_mini_tools_button = tools_btn
+         
+         # 添加笔记下载器按钮
+         note_downloader_btn = QToolButton(self.main_window.activity_bar_toolbar)
+         note_downloader_btn.setText("笔记")
+         note_downloader_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+         note_downloader_btn.setToolTip("笔记下载器 (切换)")
+         note_downloader_btn.setCheckable(True)
+         note_downloader_btn.setChecked(False)
+         note_downloader_btn.clicked.connect(self._toggle_note_downloader_panel_visibility)
+         note_downloader_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+         self.main_window.activity_bar_toolbar.addWidget(note_downloader_btn)
+         self.main_window.toggle_note_downloader_button = note_downloader_btn
 
          print("UIInitializer: Adding buttons for registered views to activity toolbar...")
          if hasattr(self.ui_manager, 'registered_views'):
@@ -276,30 +300,61 @@ class UIInitializer:
     def _toggle_file_explorer_visibility(self, checked):
          if self.main_window.file_explorer:
              self.main_window.file_explorer.setVisible(checked)
+             
+    def _toggle_mini_tools_dock(self, checked):
+        """切换小工具侧边栏的显示状态"""
+        if not hasattr(self.main_window, 'mini_tools_dock'):
+            # 创建小工具侧边栏
+            from ..atomic.mini_tools.calculator_widget import CalculatorWidget
+            from ..atomic.mini_tools.timer_widget import TimerWidget
+            from ..atomic.mini_tools.speech_recognition_widget import SpeechRecognitionWidget
+            from ..composite.combined_tools import CombinedTools
+            
+            # 创建小工具组合面板
+            self.main_window.mini_tools_widget = CombinedTools(self.main_window)
+            
+            # 创建小工具侧边栏
+            self.main_window.mini_tools_dock = QDockWidget("小工具集合", self.main_window)
+            self.main_window.mini_tools_dock.setObjectName("MiniToolsDock")
+            self.main_window.mini_tools_dock.setWidget(self.main_window.mini_tools_widget)
+            self.main_window.mini_tools_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+            self.main_window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.main_window.mini_tools_dock)
+            
+            # 连接关闭信号
+            self.main_window.mini_tools_dock.visibilityChanged.connect(
+                lambda visible: self.main_window.toggle_mini_tools_button.setChecked(visible)
+            )
+        
+        # 切换显示状态
+        self.main_window.mini_tools_dock.setVisible(checked)
 
     def _toggle_note_downloader_panel_visibility(self, checked): 
-         if self.main_window.note_downloader_panel:
-             button = self.main_window.activity_view_buttons.get("NoteDownloader")
-             if button:
-                 button.setChecked(checked) 
-                 self.handle_activity_button_click("NoteDownloader", button) 
-             else: 
-                if checked:
-                    # This fallback logic for tool_box_widget might be outdated if tool_box_widget was removed
-                    if hasattr(self.main_window, 'tool_box_widget') and self.main_window.tool_box_widget is not None:
-                        self.main_window.tool_box_widget.addTab(self.main_window.note_downloader_panel, "笔记下载器")
-                        self.main_window.tool_box_widget.setCurrentWidget(self.main_window.note_downloader_panel)
-                        self.main_window.tool_box_widget.show()
-                    else:
-                        print("Warning: tool_box_widget not found for NoteDownloader fallback.")
-                else:
-                    if hasattr(self.main_window, 'tool_box_widget') and self.main_window.tool_box_widget is not None:
-                        for i in range(self.main_window.tool_box_widget.count()):
-                            if self.main_window.tool_box_widget.widget(i) == self.main_window.note_downloader_panel:
-                                self.main_window.tool_box_widget.removeTab(i)
-                                break
-                    else:
-                        print("Warning: tool_box_widget not found for NoteDownloader fallback (removeTab).")
+        """切换笔记下载器面板的显示状态"""
+        if self.main_window.note_downloader_panel:
+            if not hasattr(self.main_window, 'note_downloader_dock'):
+                # 创建笔记下载器侧边栏
+                self.main_window.note_downloader_dock = QDockWidget("笔记下载器", self.main_window)
+                self.main_window.note_downloader_dock.setObjectName("NoteDownloaderDock")
+                self.main_window.note_downloader_dock.setWidget(self.main_window.note_downloader_panel)
+                self.main_window.note_downloader_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+                self.main_window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.main_window.note_downloader_dock)
+                
+                # 连接关闭信号
+                self.main_window.note_downloader_dock.visibilityChanged.connect(
+                    lambda visible: self.main_window.toggle_note_downloader_button.setChecked(visible)
+                )
+            
+            # 切换显示状态
+            self.main_window.note_downloader_dock.setVisible(checked)
+            
+            # 同步更新注册视图按钮状态（如果存在）
+            button = self.main_window.activity_view_buttons.get("NoteDownloader")
+            if button and button != self.main_window.toggle_note_downloader_button:
+                button.setChecked(checked)
+        else:
+            print("错误: note_downloader_panel 未初始化，无法显示笔记下载器。")
+            if hasattr(self.main_window, 'toggle_note_downloader_button'):
+                self.main_window.toggle_note_downloader_button.setChecked(False)
 
 
     def _register_views(self):

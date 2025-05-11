@@ -1,0 +1,57 @@
+[
+  {
+    "id": "acd44031-bbf5-45ca-9683-4a9a53209a28",
+    "content": "",
+    "color": "#ffff99",
+    "geometry": {
+      "x": 1179,
+      "y": 595,
+      "width": 200,
+      "height": 200
+    }
+  },
+  {
+    "id": "d3f1b830-777c-4318-8cd5-1d16eea06948",
+    "content": "",
+    "color": "#ffff99",
+    "geometry": {
+      "x": 1179,
+      "y": 595,
+      "width": 200,
+      "height": 200
+    }
+  },
+  {
+    "id": "e79f5fe2-80cd-445e-8350-daf630688ad2",
+    "content": "地方",
+    "color": "#ffff99",
+    "geometry": {
+      "x": 997,
+      "y": 382,
+      "width": 200,
+      "height": 200
+    }
+  },
+  {
+    "id": "a394517d-0808-4ad5-b4b3-42d0efa7cffc",
+    "content": "",
+    "color": "#ffff99",
+    "geometry": {
+      "x": 1179,
+      "y": 595,
+      "width": 200,
+      "height": 200
+    }
+  },
+  {
+    "id": "472dfeb9-eabc-44fd-b5f3-cbbdd01a31a1",
+    "content": "",
+    "color": "#ffff99",
+    "geometry": {
+      "x": 1004,
+      "y": 485,
+      "width": 200,
+      "height": 200
+    }
+  }
+]

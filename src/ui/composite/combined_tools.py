@@ -2,19 +2,13 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
 from PyQt6.QtCore import Qt
 
-# Correct relative imports from composite to atomic and other locations
+# 导入所需的组件
 from ..core.base_widget import BaseWidget
 from ..atomic.calendar.calendar_widget import CalendarWidget
 from ..atomic.mini_tools.timer_widget import TimerWidget
-# Assuming CombinedNotesWidget might be refactored later or stays in its original location
-# Adjust the import path based on its final location. If it becomes a view:
-# from ..views.combined_notes_view import CombinedNotesView
-# If it becomes a composite widget itself:
-# from .combined_notes import CombinedNotes # Example
-# For now, keep the original import path, assuming it's still valid relative to the old structure
-# or needs to be adjusted once CombinedNotesWidget is refactored.
-# Let's assume it will be moved to composite as well for consistency:
-from .combined_notes import CombinedNotes # Use the refactored composite widget
+from ..atomic.mini_tools.calculator_widget import CalculatorWidget
+from ..atomic.mini_tools.speech_recognition_widget import SpeechRecognitionWidget
+from .combined_notes import CombinedNotes
 
 
 class CombinedTools(BaseWidget):
@@ -32,22 +26,43 @@ class CombinedTools(BaseWidget):
         self.setLayout(layout)
 
         self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True) # Use document mode for a cleaner look
-        self.tabs.setObjectName("CombinedToolsTabs") # For styling
+        self.tabs.setDocumentMode(True) # 使用文档模式获得更清爽的外观
+        self.tabs.setObjectName("CombinedToolsTabs") # 用于样式设置
 
-        # 1. 日历 (Using refactored atomic widget)
-        self.calendar_tool = CalendarWidget(self)
-        self.tabs.addTab(self.calendar_tool, "日历")
+        # 1. 计算器
+        try:
+            self.calculator_tool = CalculatorWidget(self)
+            self.tabs.addTab(self.calculator_tool, "计算器")
+        except Exception as e:
+            print(f"创建计算器组件时出错: {e}")
 
-        # 2. 便签与待办 (Using refactored composite widget)
-        self.notes_tool = CombinedNotes(self)
-        self.tabs.addTab(self.notes_tool, "便签与待办")
+        # 2. 定时器
+        try:
+            self.timer_tool = TimerWidget(self)
+            self.tabs.addTab(self.timer_tool, "定时器")
+        except Exception as e:
+            print(f"创建定时器组件时出错: {e}")
 
-        # 3. 计时器 (Using refactored atomic widget)
-        self.timer_tool = TimerWidget(self)
-        self.tabs.addTab(self.timer_tool, "计时器")
+        # 3. 语音识别
+        try:
+            self.speech_tool = SpeechRecognitionWidget(self)
+            self.tabs.addTab(self.speech_tool, "语音识别")
+        except Exception as e:
+            print(f"创建语音识别组件时出错: {e}")
 
-        # Add more tools/tabs as needed
+        # 4. 日历
+        try:
+            self.calendar_tool = CalendarWidget(self)
+            self.tabs.addTab(self.calendar_tool, "日历")
+        except Exception as e:
+            print(f"创建日历组件时出错: {e}")
+
+        # 5. 便签与待办
+        try:
+            self.notes_tool = CombinedNotes(self)
+            self.tabs.addTab(self.notes_tool, "便签与待办")
+        except Exception as e:
+            print(f"创建便签与待办组件时出错: {e}")
 
         layout.addWidget(self.tabs)
 
