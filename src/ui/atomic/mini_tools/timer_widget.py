@@ -66,112 +66,113 @@ class TimerWidget(BaseWidget):
         """创建倒计时选项卡的内容"""
         layout = QVBoxLayout(tab_widget)
         layout.setSpacing(12) # As per plan: spacing=12
-        layout.setContentsMargins(0, 0, 0, 0) # Margins handled by main_layout or TimerFrame QSS
+        layout.setContentsMargins(10, 10, 10, 10) # Add some padding within the tab
 
-        # --- Time Setting Frame (Simplified) ---
-        time_frame = QWidget()
-        time_frame.setObjectName("countdownTimeFrame") # For styling
-        time_layout = QVBoxLayout(time_frame)
-        # title_label removed for minimalism
-        spinbox_layout = QHBoxLayout()
-        spinbox_layout.setSpacing(5) # Keep spacing between spinboxes tight
-        # Hour
-        hour_layout = QVBoxLayout()
+        # --- Time Setting Group ---
+        time_setting_group = QWidget()
+        time_setting_group.setObjectName("countdownTimeSettingGroup")
+        time_setting_layout = QHBoxLayout(time_setting_group)
+        time_setting_layout.setContentsMargins(0,0,0,0)
+        time_setting_layout.setSpacing(8)
+
         self.hour_spinbox = QSpinBox()
         self.hour_spinbox.setRange(0, 23)
         self.hour_spinbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hour_spinbox.lineEdit().setReadOnly(True)
-        hour_layout.addWidget(self.hour_spinbox)
-        # QLabel("小时") removed for minimalism
-        spinbox_layout.addLayout(hour_layout)
-        # Minute
-        minute_layout = QVBoxLayout()
+        self.hour_spinbox.setToolTip("小时")
+        time_setting_layout.addWidget(QLabel("时:"))
+        time_setting_layout.addWidget(self.hour_spinbox)
+
         self.minute_spinbox = QSpinBox()
         self.minute_spinbox.setRange(0, 59)
         self.minute_spinbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.minute_spinbox.lineEdit().setReadOnly(True)
-        minute_layout.addWidget(self.minute_spinbox)
-        # QLabel("分钟") removed for minimalism
-        spinbox_layout.addLayout(minute_layout)
-        # Second
-        second_layout = QVBoxLayout()
+        self.minute_spinbox.setToolTip("分钟")
+        time_setting_layout.addWidget(QLabel("分:"))
+        time_setting_layout.addWidget(self.minute_spinbox)
+
         self.second_spinbox = QSpinBox()
         self.second_spinbox.setRange(0, 59)
         self.second_spinbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.second_spinbox.lineEdit().setReadOnly(True)
-        second_layout.addWidget(self.second_spinbox)
-        # QLabel("秒钟") removed for minimalism
-        spinbox_layout.addLayout(second_layout)
-        time_layout.addLayout(spinbox_layout)
-        layout.addWidget(time_frame)
+        self.second_spinbox.setToolTip("秒钟")
+        time_setting_layout.addWidget(QLabel("秒:"))
+        time_setting_layout.addWidget(self.second_spinbox)
+        time_setting_layout.addStretch()
+        layout.addWidget(time_setting_group)
 
-        # --- Time Display Frame (Simplified) ---
-        time_display_frame = QWidget()
-        time_display_frame.setObjectName("countdownDisplayFrame")
-        time_display_layout = QVBoxLayout(time_display_frame)
-        # time_label removed for minimalism
+        # --- Time Display Group ---
+        time_display_group = QWidget()
+        time_display_group.setObjectName("countdownDisplayGroup")
+        time_display_layout = QVBoxLayout(time_display_group)
+        time_display_layout.setContentsMargins(0,0,0,0)
         self.time_display = QLabel("00:00:00")
         self.time_display.setObjectName("TimerDisplay") # For QSS
         self.time_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # As per plan: font-family: 'SF Mono', 'Consolas', monospace; font-size: 48px; font-weight: 600;
-        # QFont.Weight.Bold is 700. DemiBold is 600.
         font = QFont("'SF Mono', 'Consolas', monospace", 48)
-        font.setWeight(QFont.Weight.DemiBold) # Approx 600 weight
+        font.setWeight(QFont.Weight.DemiBold)
         self.time_display.setFont(font)
-        # self.time_display.setStyleSheet("color: #2c3e50; margin: 3px 0;") # Will be handled by QSS
         time_display_layout.addWidget(self.time_display)
-        layout.addWidget(time_display_frame)
+        layout.addWidget(time_display_group)
 
-        # --- Button Frame ---
-        button_frame = QWidget()
-        button_frame.setObjectName("countdownButtonFrame")
-        button_layout = QHBoxLayout(button_frame)
+        # --- Button Group ---
+        button_group = QWidget()
+        button_group.setObjectName("countdownButtonGroup")
+        button_layout = QHBoxLayout(button_group)
+        button_layout.setContentsMargins(0,0,0,0)
         button_layout.setSpacing(10)
-        self.start_button = QPushButton("▶︎") # Icon / Text as per plan
+        self.start_button = QPushButton("▶︎ 开始") # Icon + Text
         self.start_button.setObjectName("startButton")
-        self.pause_button = QPushButton("❚❚") # Icon / Text for pause
+        self.start_button.setIconSize(QSize(16, 16)) # Example icon size
+
+        self.pause_button = QPushButton("❚❚ 暂停") # Icon + Text
         self.pause_button.setObjectName("pauseButton")
+        self.pause_button.setIconSize(QSize(16, 16))
         self.pause_button.setEnabled(False)
-        self.reset_button = QPushButton("重置") # Keep text for reset, or use icon e.g. ↺
+
+        self.reset_button = QPushButton("↺ 重置") # Icon + Text
         self.reset_button.setObjectName("resetButton")
+        self.reset_button.setIconSize(QSize(16, 16))
+
+        button_layout.addStretch()
         button_layout.addWidget(self.start_button)
         button_layout.addWidget(self.pause_button)
         button_layout.addWidget(self.reset_button)
-        layout.addWidget(button_frame)
+        button_layout.addStretch()
+        layout.addWidget(button_group)
 
-        # --- Reminder Frame (Simplified) ---
-        reminder_frame = QWidget()
-        reminder_frame.setObjectName("countdownReminderFrame")
-        reminder_layout = QVBoxLayout(reminder_frame)
-        # reminder_title removed for minimalism
-        checkbox_layout = QHBoxLayout()
-        checkbox_layout.setSpacing(15)
-        checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.sound_checkbox = QCheckBox("声音")
+        # --- Reminder Group ---
+        reminder_group = QWidget()
+        reminder_group.setObjectName("countdownReminderGroup")
+        reminder_layout = QHBoxLayout(reminder_group)
+        reminder_layout.setContentsMargins(0,0,0,0)
+        reminder_layout.setSpacing(15)
+        reminder_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.sound_checkbox = QCheckBox("声音提醒")
         self.sound_checkbox.setChecked(True)
-        self.popup_checkbox = QCheckBox("弹窗")
+        self.popup_checkbox = QCheckBox("弹窗提醒")
         self.popup_checkbox.setChecked(True)
-        checkbox_layout.addWidget(self.sound_checkbox)
-        checkbox_layout.addWidget(self.popup_checkbox)
-        reminder_layout.addLayout(checkbox_layout)
-        layout.addWidget(reminder_frame)
 
-        # Calls to _apply_common_..._style methods removed.
-        # Styling will be handled by update_styles and QSS.
+        reminder_layout.addWidget(self.sound_checkbox)
+        reminder_layout.addWidget(self.popup_checkbox)
+        layout.addWidget(reminder_group)
+
+        layout.addStretch() # Add stretch to push content to the top
 
     def _create_alarm_tab_content(self, tab_widget):
         """创建闹钟选项卡的内容"""
         layout = QVBoxLayout(tab_widget)
         layout.setSpacing(12) # Consistent spacing
-        layout.setContentsMargins(0, 0, 0, 0) # Margins handled by main_layout or TimerFrame QSS
+        layout.setContentsMargins(10, 10, 10, 10) # Add some padding within the tab
 
-        # --- Time Setting Frame (Simplified) ---
-        time_frame = QWidget()
-        time_frame.setObjectName("alarmTimeFrame")
-        time_layout = QVBoxLayout(time_frame)
-        # title_label removed
-        time_edit_layout = QHBoxLayout()
-        time_edit_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # --- Alarm Time Setting Group ---
+        alarm_setting_group = QWidget()
+        alarm_setting_group.setObjectName("alarmTimeSettingGroup")
+        alarm_setting_layout = QHBoxLayout(alarm_setting_group)
+        alarm_setting_layout.setContentsMargins(0,0,0,0)
+        alarm_setting_layout.setSpacing(8)
+        alarm_setting_layout.addWidget(QLabel("设置闹钟时间:"))
         self.alarm_time_edit = QTimeEdit()
         self.alarm_time_edit.setObjectName("alarmTimeEdit") # For QSS
         self.alarm_time_edit.setDisplayFormat("HH:mm")
@@ -179,68 +180,71 @@ class TimerWidget(BaseWidget):
         self.alarm_time_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.alarm_time_edit.setButtonSymbols(QTimeEdit.ButtonSymbols.UpDownArrows)
         self.alarm_time_edit.lineEdit().setReadOnly(True)
-        time_edit_layout.addWidget(self.alarm_time_edit)
-        time_layout.addLayout(time_edit_layout)
-        layout.addWidget(time_frame)
+        alarm_setting_layout.addWidget(self.alarm_time_edit)
+        alarm_setting_layout.addStretch()
+        layout.addWidget(alarm_setting_group)
 
-        # --- Info Frame (Simplified) ---
-        info_frame = QWidget()
-        info_frame.setObjectName("alarmInfoFrame")
-        info_layout = QVBoxLayout(info_frame)
-        # alarm_info_label removed
+        # --- Alarm Info Group ---
+        alarm_info_group = QWidget()
+        alarm_info_group.setObjectName("alarmInfoGroup")
+        alarm_info_layout = QVBoxLayout(alarm_info_group)
+        alarm_info_layout.setContentsMargins(0,0,0,0)
+        alarm_info_layout.setSpacing(5)
+
         self.next_alarm_label = QLabel("下一个闹钟: 未设置")
         self.next_alarm_label.setObjectName("nextAlarmLabel") # For QSS
         self.next_alarm_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # self.next_alarm_label.setStyleSheet("font-size: 12px; color: #e74c3c; margin: 3px 0;") # QSS
-        info_layout.addWidget(self.next_alarm_label)
-        # time_now_label removed
+        alarm_info_layout.addWidget(self.next_alarm_label)
+
         self.current_time_label = QLabel("00:00:00")
         self.current_time_label.setObjectName("currentTimeLabel") # For QSS
         self.current_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # As per plan: font-family: 'SF Mono', 'Consolas', monospace; font-size: 48px; font-weight: 600;
-        # Using similar large font as countdown for consistency, if desired, or smaller
-        font = QFont("'SF Mono', 'Consolas', monospace", 28) # Or 48 if to match countdown display
-        font.setWeight(QFont.Weight.DemiBold)
+        font = QFont("'SF Mono', 'Consolas', monospace", 36) # Slightly smaller for current time
+        font.setWeight(QFont.Weight.Normal)
         self.current_time_label.setFont(font)
-        # self.current_time_label.setStyleSheet("color: #2c3e50; margin: 3px 0;") # QSS
-        info_layout.addWidget(self.current_time_label)
-        layout.addWidget(info_frame)
+        alarm_info_layout.addWidget(self.current_time_label)
+        layout.addWidget(alarm_info_group)
 
-        # --- Button Frame ---
-        button_frame = QWidget()
-        button_frame.setObjectName("alarmButtonFrame")
-        button_layout = QHBoxLayout(button_frame)
-        button_layout.setSpacing(10)
-        self.set_alarm_button = QPushButton("设置闹钟")
+        # --- Alarm Button Group ---
+        alarm_button_group = QWidget()
+        alarm_button_group.setObjectName("alarmButtonGroup")
+        alarm_button_layout = QHBoxLayout(alarm_button_group)
+        alarm_button_layout.setContentsMargins(0,0,0,0)
+        alarm_button_layout.setSpacing(10)
+
+        self.set_alarm_button = QPushButton("✓ 设置闹钟") # Icon + Text
         self.set_alarm_button.setObjectName("setAlarmButton")
-        self.cancel_alarm_button = QPushButton("取消闹钟")
+        self.set_alarm_button.setIconSize(QSize(16,16))
+
+        self.cancel_alarm_button = QPushButton("✗ 取消闹钟") # Icon + Text
         self.cancel_alarm_button.setObjectName("cancelAlarmButton")
+        self.cancel_alarm_button.setIconSize(QSize(16,16))
         self.cancel_alarm_button.setEnabled(False)
-        button_layout.addWidget(self.set_alarm_button)
-        button_layout.addWidget(self.cancel_alarm_button)
-        layout.addWidget(button_frame)
 
-        # --- Reminder Frame (Simplified) ---
-        reminder_frame = QWidget()
-        reminder_frame.setObjectName("alarmReminderFrame")
-        reminder_layout = QVBoxLayout(reminder_frame)
-        # reminder_title removed
-        checkbox_layout = QHBoxLayout()
-        checkbox_layout.setSpacing(15)
-        checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.alarm_sound_checkbox = QCheckBox("声音")
-        self.alarm_sound_checkbox.setObjectName("alarmSoundCheckbox") # For QSS
+        alarm_button_layout.addStretch()
+        alarm_button_layout.addWidget(self.set_alarm_button)
+        alarm_button_layout.addWidget(self.cancel_alarm_button)
+        alarm_button_layout.addStretch()
+        layout.addWidget(alarm_button_group)
+
+        # --- Alarm Reminder Group ---
+        alarm_reminder_group = QWidget()
+        alarm_reminder_group.setObjectName("alarmReminderGroup")
+        alarm_reminder_layout = QHBoxLayout(alarm_reminder_group)
+        alarm_reminder_layout.setContentsMargins(0,0,0,0)
+        alarm_reminder_layout.setSpacing(15)
+        alarm_reminder_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.alarm_sound_checkbox = QCheckBox("声音提醒")
         self.alarm_sound_checkbox.setChecked(True)
-        self.alarm_popup_checkbox = QCheckBox("弹窗")
-        self.alarm_popup_checkbox.setObjectName("alarmPopupCheckbox") # For QSS
+        self.alarm_popup_checkbox = QCheckBox("弹窗提醒")
         self.alarm_popup_checkbox.setChecked(True)
-        checkbox_layout.addWidget(self.alarm_sound_checkbox)
-        checkbox_layout.addWidget(self.alarm_popup_checkbox)
-        reminder_layout.addLayout(checkbox_layout)
-        layout.addWidget(reminder_frame)
 
-        # Calls to _apply_common_..._style methods removed.
-        # Styling will be handled by update_styles and QSS.
+        alarm_reminder_layout.addWidget(self.alarm_sound_checkbox)
+        alarm_reminder_layout.addWidget(self.alarm_popup_checkbox)
+        layout.addWidget(alarm_reminder_group)
+
+        layout.addStretch() # Add stretch to push content to the top
 
     def _connect_signals(self):
         """连接信号与槽"""
@@ -547,7 +551,7 @@ class TimerWidget(BaseWidget):
         if self.countdown_active and self.countdown_timer.isActive():
             self.countdown_timer.stop()
             # self.countdown_active = False # Keep active flag true, just timer stopped
-            self.start_button.setText("继续")
+            self.start_button.setText("▶︎ 继续") # Updated text
             self.start_button.setEnabled(True)
             self.pause_button.setEnabled(False)
 
@@ -556,7 +560,7 @@ class TimerWidget(BaseWidget):
         self.countdown_active = False
         self.remaining_seconds = 0
         self.time_display.setText("00:00:00")
-        self.start_button.setText("开始")
+        self.start_button.setText("▶︎ 开始") # Updated text
         self.start_button.setEnabled(True)
         self.pause_button.setEnabled(False)
         # Reset button might be disabled after reset, or kept enabled
@@ -576,7 +580,7 @@ class TimerWidget(BaseWidget):
             if self.remaining_seconds == 0:
                 self.countdown_timer.stop()
                 self.countdown_active = False
-                self.start_button.setText("开始")
+                self.start_button.setText("▶︎ 开始") # Updated text
                 self.start_button.setEnabled(True)
                 self.pause_button.setEnabled(False)
                 self.hour_spinbox.setEnabled(True)
