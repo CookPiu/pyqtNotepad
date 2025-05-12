@@ -75,11 +75,7 @@
   <div id="editor-wrapper">
     <div id="toolbar-container"><!-- 工具栏 --></div>
     <div id="editor-container"><!-- 编辑器 --></div>
-    <div class="file-actions">
-      <button id="import-file-btn">导入文件</button>
-      <button id="export-file-btn">导出文件</button>
-      <input type="file" id="file-input" accept=".html,.txt,.md" />
-    </div>
+
   </div>
 
   <!-- 用于与PyQt通信的隐藏元素 -->
@@ -225,38 +221,6 @@
         console.error('[editor.html] WangEditor "editor" instance or required methods (deleteFragment, insertText) not found for replaceSelectionWithText.');
       }
     }
-
-    // 文件导入功能
-    document.getElementById('import-file-btn').addEventListener('click', function () {
-      document.getElementById('file-input').click();
-    });
-
-    document.getElementById('file-input').addEventListener('change', function (e) {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = function (e) {
-        const content = e.target.result;
-        // 设置编辑器内容
-        editor.setHtml(content);
-        // 通知PyQt文件已导入
-        if (window.pyqtBridge) {
-          window.pyqtBridge.contentChanged(content);
-          window.pyqtBridge.fileImported(file.name);
-        }
-      };
-      reader.readAsText(file);
-    });
-
-    // 文件导出功能
-    document.getElementById('export-file-btn').addEventListener('click', function () {
-      const content = editor.getHtml();
-      // 通知PyQt导出文件
-      if (window.pyqtBridge) {
-        window.pyqtBridge.exportFile(content);
-      }
-    });
 
     // 当页面加载完成时初始化WebChannel
     window.addEventListener('load', function () {

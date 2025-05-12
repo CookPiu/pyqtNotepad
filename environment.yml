@@ -4,10 +4,25 @@ channels:
   - defaults
 dependencies:
   - python=3.10 # 指定 Python 版本
-  - pyqt>=6.0   # PyQt6 的 Conda 包名通常是 pyqt
-  - pyqtwebengine>=6.0 # PyQt6-WebEngine 的 Conda 包名
+  # - pyqt>=6.0   # PyQt6 的 Conda 包名通常是 pyqt - 切换到 pip 管理
+  # - pyqtwebengine>=6.0 # PyQt6-WebEngine 的 Conda 包名 - 切换到 pip 管理
+  # - pyqt6-multimedia # 添加 PyQt6 Multimedia 模块 - 切换到 pip 管理
   - selenium
   - webdriver-manager
+  - pyyaml # 添加 PyYAML
+  # pyaudio # 从conda依赖中移除，尝试通过pip安装
   - pip # 添加 pip 本身作为 Conda 依赖
   - pip:
     - PyMuPDF>=1.18 # 使用 pip 安装 PyMuPDF (包名通常区分大小写)
+    - PyAudio # 通过pip安装PyAudio
+    - baidu-aip # 百度语音服务SDK
+    - chardet # baidu-aip 的依赖
+    - beautifulsoup4 # 添加 beautifulsoup4
+    - markdown-it-py # 添加 markdown-it-py
+    - markdownify # 添加 markdownify
+    - PyQt6
+    - PyQt6-WebEngine
+    - markdown # Python-Markdown 库
+    - openai
+    - pymdown-extensions
+    # PyQt6-Multimedia # 之前尝试 pip 安装失败，看 PyQt6 主包是否包含
