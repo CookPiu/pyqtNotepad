@@ -4,5 +4,7 @@
     "secret_key": "u5QwxwdZpVtr5TcN3hFflPYjMyoWBKmU",
     "language": "Mandarin",
     "sample_rate": "16000 Hz",
-    "microphone_index": 0
+    "microphone_index": 1,
+    "engine_type": "Whisper",
+    "whisper_model_size": "medium"
 }

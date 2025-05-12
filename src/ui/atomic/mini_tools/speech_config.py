@@ -23,7 +23,9 @@ class SpeechConfig:
             "secret_key": "",
             "language": "Mandarin",
             "sample_rate": "16000 Hz",
-            "microphone_index": 0
+            "microphone_index": 0,
+            "engine_type": "Baidu",  # 新增：语音识别引擎类型 (Baidu, Whisper)
+            "whisper_model_size": "base"  # 新增：Whisper模型大小
         }
         
         # 确保配置目录存在
@@ -122,4 +124,22 @@ class SpeechConfig:
     def save_sample_rate(self, sample_rate):
         """保存采样率设置"""
         self.config["sample_rate"] = sample_rate
+        return self.save_config()
+
+    def get_engine_type(self):
+        """获取选择的识别引擎类型"""
+        return self.config.get("engine_type", "Baidu")
+
+    def save_engine_type(self, engine_type):
+        """保存选择的识别引擎类型"""
+        self.config["engine_type"] = engine_type
+        return self.save_config()
+
+    def get_whisper_model_size(self):
+        """获取Whisper模型大小"""
+        return self.config.get("whisper_model_size", "base")
+
+    def save_whisper_model_size(self, model_size):
+        """保存Whisper模型大小"""
+        self.config["whisper_model_size"] = model_size
         return self.save_config()

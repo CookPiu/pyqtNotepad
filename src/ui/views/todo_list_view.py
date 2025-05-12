@@ -525,7 +525,7 @@ class TodoListView(BaseWidget):
                     except Exception:
                         pass  # 如果之前没有连接，会抛出异常，忽略即可
                     calendar.events_imported.connect(self.handle_imported_events)
-                    print(f"已连接日历组件的事件导入信号")
+
         except Exception as e:
             print(f"连接日历组件信号时出错: {e}")
             
