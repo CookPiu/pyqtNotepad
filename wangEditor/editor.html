@@ -128,6 +128,34 @@
 
     // 编辑器配置
     const editorConfig = {
+      MENU_CONF: {
+        codeLangs: [
+        { text: 'CSS', value: 'css' },
+        { text: 'HTML', value: 'html' },
+        { text: 'XML', value: 'xml' },
+        { text: 'PYTHON', value: 'python' },
+        { text: 'C', value: 'c' },
+        { text: 'C++', value: 'c++' },
+        { text: 'JAVA', value: 'java' },
+        { text: 'JAVASCRIPT', value: 'javascript' },
+        { text: 'PHP', value: 'php' },
+        { text: 'RUBY', value: 'ruby' },
+        { text: 'SQL', value: 'sql' },
+        { text: 'JSON', value: 'json' },
+        { text: 'MARKDOWN', value: 'markdown' },
+        { text: 'YAML', value: 'yaml' },
+        { text: 'BASH', value: 'bash' },
+        { text: 'R', value: 'r' },
+        { text: 'SCALA', value: 'scala' },
+        { text: 'PERL', value: 'perl' },
+        { text: 'POWERSHELL', value: 'powershell' },
+        { text: 'KOTLIN', value: 'kotlin' },
+        { text: 'GO', value: 'go' },
+        { text: 'DELPHI', value: 'delphi' },
+        { text: 'RUST', value: 'rust' },
+        { text: 'SWIFT', value: 'swift' },
+        ]
+      },
       placeholder: '请输入内容...',
       onChange(editor) {
         // 当编辑器内容变化时，更新隐藏的textarea
@@ -137,7 +165,6 @@
         window.pyqtBridge && window.pyqtBridge.contentChanged(html)
       },
     }
-
     // 创建编辑器实例
     const editor = createEditor({
       selector: '#editor-container',
