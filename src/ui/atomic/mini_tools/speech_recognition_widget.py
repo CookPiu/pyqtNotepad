@@ -120,6 +120,7 @@ class RecognitionThread(QThread):
         self.language = language
         self.engine_type = engine_type
         self.whisper_model_size = whisper_model_size
+        self.audio_file = audio_file # Store audio_file path
         super().__init__() # Call super-class __init__
     
     def run(self):
@@ -263,110 +264,103 @@ class SpeechRecognitionWidget(QWidget):
         self.init_ui()
         
     def init_ui(self):
-        # Main layout
-        main_layout = QVBoxLayout()
-        
-        # Engine selection layout
-        engine_selection_layout = QHBoxLayout()
+        main_layout = QVBoxLayout(self) # Set main_layout directly on self
+
+        # --- Settings Group ---
+        settings_group_layout = QGridLayout()
+        settings_group_layout.setColumnStretch(1, 1) # Allow combo boxes to stretch
+        settings_group_layout.setColumnStretch(3, 1)
+
+        # Engine selection
         self.engine_label = QLabel("识别引擎:")
         self.engine_combo = QComboBox()
         self.engine_combo.addItems(["Baidu", "Whisper"])
         self.engine_combo.setCurrentText(self.config.get_engine_type())
         self.engine_combo.currentTextChanged.connect(self.on_engine_changed)
-        engine_selection_layout.addWidget(self.engine_label)
-        engine_selection_layout.addWidget(self.engine_combo)
-        main_layout.addLayout(engine_selection_layout)
+        settings_group_layout.addWidget(self.engine_label, 0, 0)
+        settings_group_layout.addWidget(self.engine_combo, 0, 1, 1, 3) # Span 3 columns for now
 
-        # Whisper model selection (initially hidden or shown based on config)
-        self.whisper_model_layout = QHBoxLayout()
+        # Whisper model selection
         self.whisper_model_label = QLabel("Whisper模型:")
         self.whisper_model_combo = QComboBox()
         self.whisper_model_combo.addItems(["tiny", "base", "small", "medium", "large"])
         self.whisper_model_combo.setCurrentText(self.config.get_whisper_model_size())
         self.whisper_model_combo.currentTextChanged.connect(self.save_whisper_model_selection)
-        self.whisper_model_layout.addWidget(self.whisper_model_label)
-        self.whisper_model_layout.addWidget(self.whisper_model_combo)
-        main_layout.addLayout(self.whisper_model_layout)
-        
+        settings_group_layout.addWidget(self.whisper_model_label, 1, 0)
+        settings_group_layout.addWidget(self.whisper_model_combo, 1, 1, 1, 3) # Span 3 columns
+
         # Settings button (Baidu API settings)
-        self.settings_btn = QPushButton("百度API设置") # Renamed for clarity
+        self.settings_btn = QPushButton("百度API设置")
         self.settings_btn.clicked.connect(self.show_api_settings)
-        main_layout.addWidget(self.settings_btn)
+        settings_group_layout.addWidget(self.settings_btn, 2, 0, 1, 4) # Span all 4 columns
 
-        # Initial visibility based on selected engine
-        self._update_engine_specific_ui(self.config.get_engine_type())
-
-        # Language and sample rate selection
-        options_layout = QHBoxLayout()
-        
         # Language selection
         self.language_label = QLabel("Language:")
         self.language_combo = QComboBox()
-        self.language_combo.addItems(["Mandarin", "English"]) # For Whisper, these will be mapped
+        self.language_combo.addItems(["Mandarin", "English"])
         self.language_combo.setCurrentText(self.config.get_language())
         self.language_combo.currentTextChanged.connect(self.save_language_selection)
-        options_layout.addWidget(self.language_label)
-        options_layout.addWidget(self.language_combo)
+        settings_group_layout.addWidget(self.language_label, 3, 0)
+        settings_group_layout.addWidget(self.language_combo, 3, 1)
         
-        # Sample rate selection (Note: Whisper handles sample rate internally, this is mainly for Baidu or recording)
+        # Sample rate selection
         self.sample_rate_label = QLabel("Sample Rate (for recording):")
         self.sample_rate_combo = QComboBox()
-        self.sample_rate_combo.addItems(["16000 Hz", "8000 Hz"]) # Whisper prefers 16000 Hz
+        self.sample_rate_combo.addItems(["16000 Hz", "8000 Hz"])
         self.sample_rate_combo.setCurrentText(self.config.get_sample_rate())
         self.sample_rate_combo.currentTextChanged.connect(self.save_sample_rate_selection)
-        options_layout.addWidget(self.sample_rate_label)
-        options_layout.addWidget(self.sample_rate_combo)
-        
-        main_layout.addLayout(options_layout)
+        settings_group_layout.addWidget(self.sample_rate_label, 3, 2, Qt.AlignmentFlag.AlignRight) # Align label to right
+        settings_group_layout.addWidget(self.sample_rate_combo, 3, 3)
         
         # Microphone selection
-        mic_layout = QHBoxLayout()
         self.mic_label = QLabel("Microphone:")
         self.mic_combo = QComboBox()
         self.load_microphone_devices()
         self.mic_combo.currentIndexChanged.connect(self.save_microphone_selection)
-        mic_layout.addWidget(self.mic_label)
-        mic_layout.addWidget(self.mic_combo)
+        settings_group_layout.addWidget(self.mic_label, 4, 0)
+        settings_group_layout.addWidget(self.mic_combo, 4, 1, 1, 2) # Span 2 columns
         
         # Refresh microphone button
         self.refresh_mic_btn = QPushButton("刷新麦克风")
         self.refresh_mic_btn.clicked.connect(self.load_microphone_devices)
-        mic_layout.addWidget(self.refresh_mic_btn)
+        settings_group_layout.addWidget(self.refresh_mic_btn, 4, 3)
         
-        main_layout.addLayout(mic_layout)
-        
-        # Record button
-        self.record_btn = QPushButton("开始实时识别") # Changed text
+        main_layout.addLayout(settings_group_layout)
+
+        # Initial visibility based on selected engine
+        self._update_engine_specific_ui(self.config.get_engine_type())
+
+        # --- Controls Group ---
+        self.record_btn = QPushButton("开始实时识别")
         self.record_btn.clicked.connect(self.toggle_recording)
         main_layout.addWidget(self.record_btn)
         
-        # Progress bar - May be less relevant for continuous, or show "Recording..."
         self.progress_bar = QProgressBar()
-        # self.progress_bar.setRange(0, 100) # Or set to indeterminate
-        # self.progress_bar.setValue(0)
         self.progress_bar.setRange(0,0) # Indeterminate progress
-        self.progress_bar.setVisible(False) # Initially hidden
+        self.progress_bar.setVisible(False)
         main_layout.addWidget(self.progress_bar)
         
-        # Recognition result display
+        # --- Result Group ---
         self.result_label = QLabel("Recognition Result:")
         main_layout.addWidget(self.result_label)
         
         self.result_text = QTextEdit()
         self.result_text.setReadOnly(True)
-        main_layout.addWidget(self.result_text)
+        main_layout.addWidget(self.result_text) # QTextEdit will stretch by default
         
-        # Copy result button
+        # --- Bottom Buttons Group ---
+        bottom_button_layout = QHBoxLayout()
         self.copy_btn = QPushButton("Copy Result")
         self.copy_btn.clicked.connect(self.copy_result)
-        main_layout.addWidget(self.copy_btn)
-        
-        # Clear result button
         self.clear_btn = QPushButton("Clear Result")
         self.clear_btn.clicked.connect(self.clear_result)
-        main_layout.addWidget(self.clear_btn)
+        bottom_button_layout.addStretch(1) # Add stretch to push buttons to center or right
+        bottom_button_layout.addWidget(self.copy_btn)
+        bottom_button_layout.addWidget(self.clear_btn)
+        bottom_button_layout.addStretch(1) # Add stretch
+        main_layout.addLayout(bottom_button_layout)
         
-        self.setLayout(main_layout)
+        # self.setLayout(main_layout) # Already set with QVBoxLayout(self)
     
     def show_api_settings(self):
         """Show API settings dialog"""
