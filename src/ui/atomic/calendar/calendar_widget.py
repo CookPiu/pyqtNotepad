@@ -158,6 +158,7 @@ class CalendarWidget(BaseWidget):
     """
     event_saved = pyqtSignal(object) # Signal emitted when an event is saved/deleted
     event_selected = pyqtSignal(object) # Signal emitted when an event is selected in the list
+    events_imported = pyqtSignal(list) # Signal emitted when events are imported from ICS file
 
     def __init__(self, parent=None):
         self.events = {}  # {date_str: [event_dict, ...]}
@@ -205,8 +206,10 @@ class CalendarWidget(BaseWidget):
         buttons_layout.setSpacing(10)
         self.add_event_btn = QPushButton("添加事件")
         self.today_btn = QPushButton("今天")
+        self.import_btn = QPushButton("导入ICS")
         buttons_layout.addWidget(self.add_event_btn)
         buttons_layout.addWidget(self.today_btn)
+        buttons_layout.addWidget(self.import_btn)
         calendar_layout.addLayout(buttons_layout)
 
         # --- Right Pane: Event List and Details ---
@@ -257,6 +260,7 @@ class CalendarWidget(BaseWidget):
         self.calendar.clicked.connect(self.date_selected)
         self.add_event_btn.clicked.connect(self.add_event)
         self.today_btn.clicked.connect(self.go_to_today)
+        self.import_btn.clicked.connect(self.import_ics_file)
         self.event_list.itemSelectionChanged.connect(self.display_selected_event_details)
         self.event_list.itemDoubleClicked.connect(self.edit_event_item) # Edit on double click
         self.edit_event_btn.clicked.connect(self.edit_selected_event)
@@ -632,6 +636,70 @@ class CalendarWidget(BaseWidget):
         except (IOError, Exception) as e:
             print(f"保存事件数据时出错 ({self._data_file_path}): {e}")
             QMessageBox.critical(self, "保存错误", f"无法保存事件数据到文件:\n{e}")
+    
+    def save_events(self):
+        """保存事件到文件，是save_events_to_file的别名"""
+        self.save_events_to_file()
+            
+    def import_ics_file(self):
+        """导入ICS文件"""
+        from PyQt6.QtWidgets import QFileDialog
+        from ....data.ics_importer import ICSImporter
+        
+        # 打开文件选择对话框
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择ICS文件",
+            "",
+            "iCalendar文件 (*.ics);;所有文件 (*.*)"
+        )
+        
+        if not file_path:
+            return  # 用户取消了选择
+        
+        try:
+            # 创建ICS导入器并解析文件
+            importer = ICSImporter()
+            calendar_events, todo_items = importer.parse_ics_file(file_path)
+            
+            if not calendar_events and not todo_items:
+                QMessageBox.warning(self, "导入失败", "未能从ICS文件中提取任何事件或待办事项。")
+                return
+            
+            # 导入日历事件
+            imported_count = 0
+            for event in calendar_events:
+                date_str = event.get('date')
+                if date_str:
+                    if date_str not in self.events:
+                        self.events[date_str] = []
+                    self.events[date_str].append(event)
+                    imported_count += 1
+            
+            # 保存事件并更新显示
+            if imported_count > 0:
+                self.save_events()
+                self.mark_event_dates()
+                self.update_date_display()
+                # Pass the currently selected date to update_event_list
+                selected_date_str = self.calendar.selectedDate().toString("yyyy-MM-dd")
+                self.update_event_list(selected_date_str)
+                
+                # 发送导入的待办事项信号
+                if todo_items:
+                    self.events_imported.emit(todo_items)
+                
+                QMessageBox.information(
+                    self,
+                    "导入成功",
+                    f"成功导入 {imported_count} 个日历事件和 {len(todo_items)} 个待办事项。"
+                )
+            else:
+                QMessageBox.information(self, "导入结果", "未找到有效的日历事件。")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "导入错误", f"导入ICS文件时出错：{str(e)}")
+            print(f"Error importing ICS file: {e}")
 
     def _select_event_in_list(self, event_id):
          """Tries to find and select an event by ID in the current list."""

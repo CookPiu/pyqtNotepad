@@ -455,6 +455,9 @@ class TodoListView(BaseWidget):
         from ...data.data_manager import TodoDataManager
         self.data_manager = TodoDataManager()
         super().__init__(parent)
+        
+        # 连接日历组件的事件导入信号
+        self.connect_calendar_signals()
 
     # 数据文件路径现在由数据管理器处理
 
@@ -504,6 +507,31 @@ class TodoListView(BaseWidget):
         self.priority_filter_combo.currentTextChanged.connect(self.refresh_display_list)
         self.add_button.clicked.connect(self.add_new_item_dialog)
         self.quick_add_edit.returnPressed.connect(self.quick_add_item)
+        
+    def connect_calendar_signals(self):
+        """连接日历组件的信号"""
+        try:
+            # 延迟导入以避免循环导入
+            from ...ui.atomic.calendar.calendar_widget import CalendarWidget
+            
+            # 查找主窗口中的所有日历组件
+            main_window = self.window()
+            if main_window:
+                calendar_widgets = main_window.findChildren(CalendarWidget)
+                for calendar in calendar_widgets:
+                    try:
+                        # 断开之前的连接以避免重复
+                        calendar.events_imported.disconnect(self.handle_imported_events)
+                    except Exception:
+                        pass  # 如果之前没有连接，会抛出异常，忽略即可
+                    calendar.events_imported.connect(self.handle_imported_events)
+                    print(f"已连接日历组件的事件导入信号")
+        except Exception as e:
+            print(f"连接日历组件信号时出错: {e}")
+            
+        # 如果当前没有找到日历组件，设置一个定时器稍后再尝试
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(500, self.connect_calendar_signals)
 
     def _apply_theme(self):
         """应用主题"""
@@ -851,6 +879,55 @@ class TodoListView(BaseWidget):
         except Exception as e:
             print(f"处理删除请求时出错: {e}")
             QMessageBox.critical(self, "错误", "处理删除请求时发生错误。")
+    
+    def handle_imported_events(self, todo_items):
+        """处理从ICS文件导入的待办事项
+        
+        Args:
+            todo_items: 待办事项数据列表
+        """
+        if not todo_items:
+            return
+            
+        try:
+            # 确认导入
+            confirm = QMessageBox.question(
+                self,
+                "导入待办事项",
+                f"是否将 {len(todo_items)} 个日历事件导入为待办事项？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+                
+            # 导入待办事项
+            imported_count = 0
+            for item_data in todo_items:
+                try:
+                    # 创建TodoItem对象并添加到数据管理器
+                    todo_item = TodoItem.from_dict(item_data)
+                    success = self.data_manager.add_item(todo_item.to_dict())
+                    if success:
+                        imported_count += 1
+                except Exception as item_error:
+                    print(f"导入待办事项时出错: {item_error}")
+            
+            # 刷新显示
+            if imported_count > 0:
+                self.refresh_display_list()
+                QMessageBox.information(
+                    self,
+                    "导入成功",
+                    f"成功导入 {imported_count} 个待办事项。"
+                )
+            else:
+                QMessageBox.warning(self, "导入失败", "未能导入任何待办事项。")
+                
+        except Exception as e:
+            print(f"处理导入的待办事项时出错: {e}")
+            QMessageBox.critical(self, "导入错误", f"处理导入的待办事项时出错:\n{str(e)}")
 
     def _find_list_item_by_id(self, item_id: str) -> QListWidgetItem | None:
          """Finds the QListWidgetItem corresponding to a given data ID."""

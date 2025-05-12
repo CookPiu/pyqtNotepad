@@ -7,5 +7,50 @@
     "priority": "高",
     "completed": false,
     "created_at": "2025-05-12 14:15:26"
+  },
+  {
+    "id": "d6e5dd3e-12a5-4676-9f8f-6a5ea0afaec7",
+    "title": "Assignment (Exercises of Chapter 1-10) is due",
+    "description": "",
+    "due_date": "2025-05-15",
+    "priority": "中",
+    "completed": false,
+    "created_at": "2025-05-12 18:57:38"
+  },
+  {
+    "id": "4086e1c8-60bd-46ae-98dc-2e2eaa4d1e5c",
+    "title": "Final Exam (D1) opens",
+    "description": "",
+    "due_date": "2025-05-16",
+    "priority": "中",
+    "completed": false,
+    "created_at": "2025-05-12 18:57:38"
+  },
+  {
+    "id": "165f8fa9-c22b-4aae-9c78-58bc018374fa",
+    "title": "Final Exam (D1) closes",
+    "description": "",
+    "due_date": "2025-05-16",
+    "priority": "中",
+    "completed": false,
+    "created_at": "2025-05-12 18:57:38"
+  },
+  {
+    "id": "d61ccb0f-f6a3-45ae-8a19-b83a955a34fd",
+    "title": "Practice Exam (for Final Exam) closes",
+    "description": "",
+    "due_date": "2025-05-16",
+    "priority": "中",
+    "completed": false,
+    "created_at": "2025-05-12 18:57:38"
+  },
+  {
+    "id": "4c101f64-2021-4aa7-babd-96ffef92a594",
+    "title": "Lab Project (D2) is due",
+    "description": "",
+    "due_date": "2025-05-30",
+    "priority": "中",
+    "completed": false,
+    "created_at": "2025-05-12 18:57:38"
   }
 ]
