@@ -158,8 +158,18 @@ class MainWindow(QMainWindow):
 
         # 创建AI聊天菜单项
         self.toggle_ai_chat_action = QAction("AI对话助手", self, checkable=True, triggered=self.toggle_ai_chat_dock)
+        self.set_ai_api_key_action = QAction("设置AI API密钥", self, triggered=self.set_ai_api_key_wrapper)
+        self.clear_ai_conversation_action = QAction("清空AI对话", self, triggered=self.clear_ai_conversation_wrapper)
 
         self.about_action = QAction("关于", self, toolTip="关于", triggered=self.show_about_wrapper)
+
+    def set_ai_api_key_wrapper(self):
+        if hasattr(self, 'ai_chat_dock') and self.ai_chat_dock:
+            self.ai_chat_dock.set_api_key()
+
+    def clear_ai_conversation_wrapper(self):
+        if hasattr(self, 'ai_chat_dock') and self.ai_chat_dock:
+            self.ai_chat_dock.clear_conversation()
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -177,7 +187,12 @@ class MainWindow(QMainWindow):
         view_menu.addActions([self.zen_action, self.toggle_markdown_preview_action, 
                               self.toggle_html_view_action, # Visual edit action (self.toggle_html_visual_edit_action) removed
                               # self.toggle_html_preview_action, self.toggle_html_edit_mode_action, self.view_html_source_action, # Old HTML actions
-                              self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action, self.toggle_ai_chat_action])
+                              self.zoom_in_action, self.zoom_out_action, self.reset_zoom_action])
+        
+        ai_assistant_menu = menu_bar.addMenu("AI助手")
+        ai_assistant_menu.addAction(self.toggle_ai_chat_action)
+        ai_assistant_menu.addAction(self.set_ai_api_key_action)
+        ai_assistant_menu.addAction(self.clear_ai_conversation_action)
         
         help_menu = menu_bar.addMenu("帮助")
         help_menu.addAction(self.about_action)

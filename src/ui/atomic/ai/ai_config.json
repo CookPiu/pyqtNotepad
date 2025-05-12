@@ -1,6 +1,6 @@
 {
-    "api_key": "sk-ad9cedc923104d69a9f1899c3dfc3239",
-    "current_model": "deepseek-r1",
+    "api_key": "sk-3aa393323da547d59ee446a8c7905517",
+    "current_model": "deepseek-v3",
     "models": {
         "deepseek-v3": {
             "name": "DeepSeek V3",

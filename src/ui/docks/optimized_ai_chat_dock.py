@@ -25,30 +25,7 @@ class OptimizedAIChatDock(QDockWidget):
         self.chat_widget = OptimizedChatWidget(self)
         layout.addWidget(self.chat_widget)
         
-        # 创建底部按钮布局
-        button_layout = QHBoxLayout()
-        button_layout.setContentsMargins(4, 0, 4, 4)
-        button_layout.setSpacing(4)
-        
-        # 创建设置API密钥按钮
-        self.api_key_button = QPushButton("设置API密钥", self)
-        self.api_key_button.setStyleSheet(
-            "QPushButton { background-color: #E0E0E0; border: none; border-radius: 3px; padding: 4px 8px; font-size: 12px; }"
-            "QPushButton:hover { background-color: #BDBDBD; }"
-        )
-        self.api_key_button.clicked.connect(self.set_api_key)
-        button_layout.addWidget(self.api_key_button)
-        
-        # 创建清空对话按钮
-        self.clear_button = QPushButton("清空对话", self)
-        self.clear_button.setStyleSheet(
-            "QPushButton { background-color: #E0E0E0; border: none; border-radius: 3px; padding: 4px 8px; font-size: 12px; }"
-            "QPushButton:hover { background-color: #BDBDBD; }"
-        )
-        self.clear_button.clicked.connect(self.clear_conversation)
-        button_layout.addWidget(self.clear_button)
-        
-        layout.addLayout(button_layout)
+        # 底部按钮已移除，将通过主窗口菜单控制
         
         # 设置主容器
         container.setLayout(layout)
@@ -72,21 +49,7 @@ class OptimizedAIChatDock(QDockWidget):
     
     def update_styles(self, is_dark_theme=False):
         """更新样式以适应当前主题"""
-        if is_dark_theme:
-            self.api_key_button.setStyleSheet(
-                "QPushButton { background-color: #424242; color: #E0E0E0; border: none; border-radius: 3px; padding: 4px 8px; font-size: 12px; }"
-                "QPushButton:hover { background-color: #616161; }"
-            )
-            self.clear_button.setStyleSheet(
-                "QPushButton { background-color: #424242; color: #E0E0E0; border: none; border-radius: 3px; padding: 4px 8px; font-size: 12px; }"
-                "QPushButton:hover { background-color: #616161; }"
-            )
-        else:
-            self.api_key_button.setStyleSheet(
-                "QPushButton { background-color: #E0E0E0; border: none; border-radius: 3px; padding: 4px 8px; font-size: 12px; }"
-                "QPushButton:hover { background-color: #BDBDBD; }"
-            )
-            self.clear_button.setStyleSheet(
-                "QPushButton { background-color: #E0E0E0; border: none; border-radius: 3px; padding: 4px 8px; font-size: 12px; }"
-                "QPushButton:hover { background-color: #BDBDBD; }"
-            )
+        # 按钮已移除，此方法可能不再需要，或者只更新chat_widget的样式（如果它有的话）
+        # if hasattr(self.chat_widget, 'update_styles'):
+        #     self.chat_widget.update_styles(is_dark_theme)
+        pass # 按钮已移除
