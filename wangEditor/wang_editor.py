@@ -6,6 +6,9 @@ from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineS
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtNetwork import QSslSocket
+from PyQt6.QtWidgets import QMenu, QApplication, QMainWindow # Added
+from PyQt6.QtGui import QAction # Added
+from PyQt6.QtCore import Qt # Added
 
 
 class CustomWebPage(QWebEnginePage):
@@ -167,6 +170,73 @@ class WangEditor(QWebEngineView):
         # 加载编辑器HTML文件
         editor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "editor.html")
         self.load(QUrl.fromLocalFile(editor_path))
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        main_window = None
+        # Try to find MainWindow by traversing up the parent hierarchy
+        parent_widget = self.parent()
+        while parent_widget:
+            if isinstance(parent_widget, QMainWindow):
+                main_window = parent_widget
+                break
+            parent_widget = parent_widget.parent()
+        
+        # Standard Web Actions
+        action_undo = self.page().action(QWebEnginePage.WebAction.Undo)
+        action_undo.setText("撤销")
+        menu.addAction(action_undo)
+
+        action_redo = self.page().action(QWebEnginePage.WebAction.Redo)
+        action_redo.setText("重做")
+        menu.addAction(action_redo)
+        
+        menu.addSeparator()
+        
+        action_cut = self.page().action(QWebEnginePage.WebAction.Cut)
+        action_cut.setText("剪切")
+        menu.addAction(action_cut)
+        
+        action_copy = self.page().action(QWebEnginePage.WebAction.Copy)
+        action_copy.setText("复制")
+        menu.addAction(action_copy)
+        
+        action_paste = self.page().action(QWebEnginePage.WebAction.Paste)
+        action_paste.setText("粘贴")
+        menu.addAction(action_paste)
+        
+        menu.addSeparator()
+        
+        action_select_all = self.page().action(QWebEnginePage.WebAction.SelectAll)
+        action_select_all.setText("全选")
+        menu.addAction(action_select_all)
+
+        has_selection = self.hasSelection()
+        if has_selection:
+            menu.addSeparator()
+            
+            translate_action = menu.addAction("翻译选中内容")
+            if main_window and hasattr(main_window, 'translate_selection_wrapper'):
+                translate_action.triggered.connect(main_window.translate_selection_wrapper)
+            else:
+                translate_action.setEnabled(False)
+                print("WangEditor: Warning - Could not connect translate to MainWindow wrapper.")
+
+            calc_action = menu.addAction("计算选中内容")
+            if main_window and hasattr(main_window, 'calculate_selection_wrapper'):
+                calc_action.triggered.connect(main_window.calculate_selection_wrapper)
+            else:
+                calc_action.setEnabled(False)
+                print("WangEditor: Warning - Could not connect calculate to MainWindow wrapper.")
+
+            ai_action = menu.addAction("将选中内容复制到 AI 助手")
+            if main_window and hasattr(main_window, 'copy_to_ai_wrapper'):
+                ai_action.triggered.connect(main_window.copy_to_ai_wrapper)
+            else:
+                ai_action.setEnabled(False)
+                print("WangEditor: Warning - Could not connect copy_to_ai to MainWindow wrapper.")
+
+        menu.exec(event.globalPos())
     
     def _on_load_finished(self, success):
         """页面加载完成后的处理"""

@@ -78,9 +78,15 @@ def source_line_plugin(md_instance: MarkdownIt):
                     token.attrSet('data-source-line', str(line_start))
     md_instance.core.ruler.push('source_line_attributes', add_line_attributes_rule)
 
-md = MarkdownIt().use(source_line_plugin)
+# Initialize MarkdownIt and then set options
+md = MarkdownIt()
+md.options['html'] = True       # Allows HTML tags in markdown to pass through.
+md.options['linkify'] = True    # Autoconverts URL-like text to links.
+md.options['typographer'] = False # Disables smart quotes and other typographic replacements.
+# Apply plugins after setting options
+md.use(source_line_plugin)
 
-# --- Mermaid Integration Helper Functions ---
+# --- Mermaid and MathJax Integration Helper Functions ---
 def post_process_mermaid_blocks(html_content: str) -> str:
     """
     Converts <pre><code class="language-mermaid">...</code></pre> blocks
@@ -103,11 +109,35 @@ def post_process_mermaid_blocks(html_content: str) -> str:
     )
     return processed_html
 
-def wrap_with_mermaid(html_body: str) -> str:
+def build_full_html_preview(html_body: str, include_mathjax: bool = True) -> str:
     """
     Wraps the given HTML body in a full HTML document structure,
-    including the Mermaid.js script and initialization.
+    including Mermaid.js and optionally MathJax scripts and initialization.
     """
+    mathjax_script_html = ""
+    if include_mathjax:
+        mathjax_script_html = """
+      <!-- MathJax Configuration -->
+      <script>
+        window.MathJax = {
+          tex: {
+            inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+            displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+            processEscapes: true,
+            tags: 'ams'
+          },
+          options: {
+            skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+            ignoreHtmlClass: 'tex2jax_ignore',
+            processHtmlClass: 'tex2jax_process'
+          },
+          svg: { fontCache: 'global' }
+        };
+      </script>
+      <!-- MathJax Core Script -->
+      <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+"""
+
     return f"""
     <!DOCTYPE html>
     <html>
@@ -117,13 +147,25 @@ def wrap_with_mermaid(html_body: str) -> str:
       <!-- Mermaid 核心脚本 -->
       <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
       <script>mermaid.initialize({{ startOnLoad: true }});</script>
+      {mathjax_script_html}
       <style>
         body {{ margin: 0; padding: 1em; font-family: sans-serif; }}
         /* Add any other global styles for preview here */
+        /* Basic MathJax styling for visibility if needed */
+        .MathJax_Display {{ text-align: center; margin: 1em 0em; }}
+        mjx-container[jax="SVG"] {{ direction: ltr; }} /* Ensure LTR for MathJax SVG output */
+        mjx-container mjx-math {{ /* Allow horizontal scroll for single-line formulas */
+            overflow-x: auto;
+            overflow-y: hidden;
+            display: inline-block; /* Changed from block to inline-block for better flow with text */
+            max-width: 100%;
+        }}
       </style>
     </head>
     <body>
-      {html_body}
+      <div id="preview-content-area">
+        {html_body}
+      </div>
     </body>
     </html>
     """
@@ -261,13 +303,224 @@ class MarkdownEditorWidget(QWidget):
         self.editor.cursorPositionChanged.connect(self._highlight_current_line_in_editor) # Optional: current line highlight
 
         self.editor.textChanged.connect(self._on_editor_text_changed)
-        self._render_preview_html("") 
+        
+        # Setup custom context menu for the QPlainTextEdit
+        self.editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.editor.customContextMenuRequested.connect(self.show_custom_context_menu)
+        
+        # Set custom context menu for the preview QWebEngineView
+        self.preview.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.preview.customContextMenuRequested.connect(self.show_preview_custom_context_menu)
+        
         self.is_preview_mode = False
+        self._pending_preview_setup = False # Flag for JS execution after load
+        self.preview.loadFinished.connect(self._on_preview_load_finished)
+
+        self._render_preview_html("") 
         self.stacked_widget.setCurrentIndex(self.editor_page_index)
         self.update_line_number_area_width() # Initial width update
 
         # For current line highlight in editor (optional, similar to TextEditor)
         self._editor_current_line_selection = QTextEdit.ExtraSelection() # Use QTextEdit.ExtraSelection
+
+
+    def show_custom_context_menu(self, position):
+        from PyQt6.QtWidgets import QMenu, QApplication, QMainWindow # Ensure QMenu, QApplication, QMainWindow are imported
+        # QAction is already imported via PyQt6.QtGui
+
+        menu = QMenu(self.editor)
+        # Try to get MainWindow instance. self.window() might be the top-level window.
+        main_window = self.window() 
+        if not isinstance(main_window, QMainWindow): 
+            # A more robust way might be needed if self.window() isn't the MainWindow
+            # For now, assume it is or try parent().
+            parent_widget = self.parent()
+            while parent_widget:
+                if isinstance(parent_widget, QMainWindow):
+                    main_window = parent_widget
+                    break
+                parent_widget = parent_widget.parent()
+
+        # Standard actions
+        undo_action = menu.addAction("撤销")
+        undo_action.setEnabled(self.editor.document().isUndoAvailable())
+        undo_action.triggered.connect(self.editor.undo)
+
+        redo_action = menu.addAction("重做")
+        redo_action.setEnabled(self.editor.document().isRedoAvailable())
+        redo_action.triggered.connect(self.editor.redo)
+        
+        menu.addSeparator()
+
+        cut_action = menu.addAction("剪切")
+        cut_action.setEnabled(self.editor.textCursor().hasSelection())
+        cut_action.triggered.connect(self.editor.cut)
+
+        copy_action = menu.addAction("复制")
+        copy_action.setEnabled(self.editor.textCursor().hasSelection())
+        copy_action.triggered.connect(self.editor.copy)
+        
+        paste_action = menu.addAction("粘贴")
+        clipboard = QApplication.clipboard()
+        can_paste_text = clipboard.mimeData().hasText() and self.editor.canPaste()
+        paste_action.setEnabled(can_paste_text)
+        if main_window and hasattr(main_window, 'paste_action_wrapper'):
+            paste_action.triggered.connect(main_window.paste_action_wrapper)
+        else:
+            paste_action.triggered.connect(self.editor.paste)
+            print("MarkdownEditorWidget: Warning - Could not connect paste to MainWindow wrapper.")
+            
+        menu.addSeparator()
+
+        select_all_action = menu.addAction("全选")
+        select_all_action.triggered.connect(self.editor.selectAll)
+
+        has_selection = self.editor.textCursor().hasSelection()
+        if has_selection:
+            menu.addSeparator()
+            
+            translate_action = menu.addAction("翻译选中内容")
+            if main_window and hasattr(main_window, 'translate_selection_wrapper'):
+                translate_action.triggered.connect(main_window.translate_selection_wrapper)
+            else:
+                translate_action.setEnabled(False)
+                print("MarkdownEditorWidget: Warning - Could not connect translate to MainWindow wrapper.")
+
+            calc_action = menu.addAction("计算选中内容")
+            if main_window and hasattr(main_window, 'calculate_selection_wrapper'):
+                calc_action.triggered.connect(main_window.calculate_selection_wrapper)
+            else:
+                calc_action.setEnabled(False)
+                print("MarkdownEditorWidget: Warning - Could not connect calculate to MainWindow wrapper.")
+
+            ai_action = menu.addAction("将选中内容复制到 AI 助手")
+            if main_window and hasattr(main_window, 'copy_to_ai_wrapper'):
+                ai_action.triggered.connect(main_window.copy_to_ai_wrapper)
+            else:
+                ai_action.setEnabled(False)
+                print("MarkdownEditorWidget: Warning - Could not connect copy_to_ai to MainWindow wrapper.")
+        
+        menu.exec(self.editor.mapToGlobal(position))
+
+    def show_preview_custom_context_menu(self, position):
+        from PyQt6.QtWidgets import QMenu, QApplication, QMainWindow
+        from PyQt6.QtWebEngineCore import QWebEnginePage
+        # QAction is already imported via PyQt6.QtGui
+
+        menu = QMenu(self.preview)
+        main_window = self.window()
+        if not isinstance(main_window, QMainWindow):
+            parent_widget = self.parent()
+            while parent_widget:
+                if isinstance(parent_widget, QMainWindow):
+                    main_window = parent_widget
+                    break
+                parent_widget = parent_widget.parent()
+
+        # Standard Web Actions
+        action_undo = self.preview.page().action(QWebEnginePage.WebAction.Undo)
+        action_undo.setText("撤销")
+        menu.addAction(action_undo)
+
+        action_redo = self.preview.page().action(QWebEnginePage.WebAction.Redo)
+        action_redo.setText("重做")
+        menu.addAction(action_redo)
+        
+        menu.addSeparator()
+        
+        action_cut = self.preview.page().action(QWebEnginePage.WebAction.Cut)
+        action_cut.setText("剪切")
+        menu.addAction(action_cut)
+        
+        action_copy = self.preview.page().action(QWebEnginePage.WebAction.Copy)
+        action_copy.setText("复制")
+        menu.addAction(action_copy)
+        
+        action_paste = self.preview.page().action(QWebEnginePage.WebAction.Paste)
+        action_paste.setText("粘贴")
+        menu.addAction(action_paste)
+        
+        menu.addSeparator()
+        
+        action_select_all = self.preview.page().action(QWebEnginePage.WebAction.SelectAll)
+        action_select_all.setText("全选")
+        menu.addAction(action_select_all)
+
+        has_selection = self.preview.hasSelection()
+        if has_selection:
+            menu.addSeparator()
+            
+            translate_action = menu.addAction("翻译选中内容")
+            if main_window and hasattr(main_window, 'translate_selection_wrapper'):
+                translate_action.triggered.connect(main_window.translate_selection_wrapper)
+            else:
+                translate_action.setEnabled(False)
+                print("MarkdownPreview: Warning - Could not connect translate to MainWindow wrapper.")
+
+            calc_action = menu.addAction("计算选中内容")
+            if main_window and hasattr(main_window, 'calculate_selection_wrapper'):
+                calc_action.triggered.connect(main_window.calculate_selection_wrapper)
+            else:
+                calc_action.setEnabled(False)
+                print("MarkdownPreview: Warning - Could not connect calculate to MainWindow wrapper.")
+
+            ai_action = menu.addAction("将选中内容复制到 AI 助手")
+            if main_window and hasattr(main_window, 'copy_to_ai_wrapper'):
+                ai_action.triggered.connect(main_window.copy_to_ai_wrapper)
+            else:
+                ai_action.setEnabled(False)
+                print("MarkdownPreview: Warning - Could not connect copy_to_ai to MainWindow wrapper.")
+        
+        menu.exec(self.preview.mapToGlobal(position))
+
+    def _on_preview_load_finished(self, success: bool):
+        if success and self._pending_preview_setup and self.is_preview_mode:
+            print("[MarkdownEditorWidget] Preview load finished, applying settings.")
+            if self.preview.page():
+                # Check if document.body exists before trying to set contentEditable
+                self.preview.page().runJavaScript(
+                    "if(document.body) { document.body.contentEditable = 'true'; } else { console.error('JS Error: document.body is null when trying to set contentEditable.'); }"
+                )
+                
+                block_to_scroll = getattr(self, '_scroll_to_block_on_preview_load', 0)
+                
+                scroll_js = (f"const targetElement = document.querySelector('[data-source-line=\"{block_to_scroll}\"]');"
+                             "if (targetElement) { targetElement.scrollIntoView({ behavior: 'auto', block: 'start' }); }"
+                             "else { console.log('Scroll target not found for block " + str(block_to_scroll) + ", scrolling to top.'); window.scrollTo(0, 0); }")
+                self.preview.page().runJavaScript(scroll_js)
+                self.preview.setFocus()
+            self._pending_preview_setup = False
+        elif not success:
+            print("[MarkdownEditorWidget] Preview load failed.")
+        
+        # Try to force MathJax to re-typeset if it missed the initial load.
+        # This is a bit of a hack, ideally MathJax handles dynamic content.
+        if success and self.is_preview_mode:
+            if self.preview.page():
+                QTimer.singleShot(350, lambda: self.preview.page().runJavaScript( # Increased delay slightly
+                    """
+                    if (typeof MathJax !== 'undefined' && MathJax.typesetPromise) {
+                        console.log('Forcing MathJax typesetPromise on #preview-content-area');
+                        const container = document.getElementById('preview-content-area');
+                        if (container) {
+                            MathJax.typesetPromise([container]).then(() => {
+                                console.log('MathJax typesetPromise on container completed.');
+                            }).catch((err) => {
+                                console.error('MathJax typesetPromise on container failed:', err);
+                            });
+                        } else {
+                            console.error('#preview-content-area not found for MathJax. Falling back to global typeset.');
+                            MathJax.typesetPromise().then(() => {
+                                console.log('MathJax global typesetPromise completed (fallback).');
+                            }).catch((err) => {
+                                console.error('MathJax global typesetPromise failed (fallback):', err);
+                            });
+                        }
+                    } else {
+                        console.log('MathJax or typesetPromise not ready for force re-render on #preview-content-area');
+                    }
+                    """
+                ))
 
 
     def update_line_number_area_width(self):
@@ -320,7 +573,17 @@ class MarkdownEditorWidget(QWidget):
             print("\n--- [MarkdownEditorWidget] Rendering Preview ---")
             print(f"[MarkdownEditorWidget] Input Markdown Text (first 100 chars): {markdown_text[:100].encode('utf-8', 'replace').decode('utf-8')}")
             
+            # Step 1: Render base HTML from Markdown
+            # LaTeX formulas like \(...\) and \[...\] should be passed through by markdown-it
+            # if it doesn't have a specific (conflicting) math plugin.
+            # MathJax will then pick them up in the browser.
             html_body = md.render(markdown_text)
+            
+            # --- DEBUGGING PRINT ---
+            if R"(\()" in markdown_text or R"(\[)" in markdown_text or "$" in markdown_text:
+                print(f"DEBUG [MarkdownEditorWidget] md.render() output for text containing LaTeX-like sequences (first 500 chars of html_body):\n{html_body[:500].encode('utf-8', 'replace').decode('utf-8')}")
+            # --- END DEBUGGING PRINT ---
+            
             # print(f"[MarkdownEditorWidget] Full md.render() output for debugging: {html_body.encode('utf-8', 'replace').decode('utf-8')}") # DEBUG: Full output
 
             if "language-mermaid" in html_body:
@@ -336,10 +599,11 @@ class MarkdownEditorWidget(QWidget):
             else:
                 print("[MarkdownEditorWidget] 'language-mermaid' NOT detected in md.render() output.")
 
-            html_body_with_mermaid_divs = post_process_mermaid_blocks(html_body)
+            # Step 3: Process for Mermaid diagrams
+            html_body_with_mermaid_divs = post_process_mermaid_blocks(html_body) # html_body here is after math preprocessing
             
             # Check transformation result based on the presence of language-mermaid in original and div.mermaid in processed
-            original_had_mermaid_lang = "language-mermaid" in html_body
+            original_had_mermaid_lang = "language-mermaid" in html_body # Check in the HTML *before* mermaid div transform
             transformed_has_div_mermaid = "class=\"mermaid\"" in html_body_with_mermaid_divs
             
             if original_had_mermaid_lang:
@@ -350,10 +614,11 @@ class MarkdownEditorWidget(QWidget):
                     print(f"[MarkdownEditorWidget] For post_process_mermaid_blocks() (first 300 chars of result): {html_body_with_mermaid_divs[:300].encode('utf-8', 'replace').decode('utf-8')}")
             elif transformed_has_div_mermaid: # No language-mermaid initially, but div.mermaid appeared
                  print("[MarkdownEditorWidget] Found <div class='mermaid'> after post-processing (original did not have 'language-mermaid').")
-            else: # No language-mermaid and no div.mermaid
-                print("[MarkdownEditorWidget] NOTE: No 'language-mermaid' block found and no <div class='mermaid'> created.")
+            # else: # No language-mermaid and no div.mermaid (This is normal if no mermaid code was present)
+                # print("[MarkdownEditorWidget] NOTE: No 'language-mermaid' block found and no <div class='mermaid'> created.")
 
-            full_html = wrap_with_mermaid(html_body_with_mermaid_divs)
+            # Step 4: Wrap in full HTML with necessary scripts (Mermaid + MathJax)
+            full_html = build_full_html_preview(html_body_with_mermaid_divs, include_mathjax=True)
             # print(f"[MarkdownEditorWidget] Full HTML for preview (first 500 chars): {full_html[:500].encode('utf-8', 'replace').decode('utf-8')}")
             
             if self.preview.page(): self.preview.page().setHtml(full_html)
@@ -361,7 +626,8 @@ class MarkdownEditorWidget(QWidget):
             print("--- [MarkdownEditorWidget] Preview Rendering Attempted ---")
         except Exception as e:
             print(f"[MarkdownEditorWidget] Error rendering Markdown for preview: {e}")
-            error_message_html = wrap_with_mermaid(f"<pre>Error rendering Markdown:\n{e}</pre>")
+            # Ensure error message also gets the full HTML structure
+            error_message_html = build_full_html_preview(f"<pre>Error rendering Markdown:\n{e}</pre>", include_mathjax=True)
             if self.preview.page(): self.preview.page().setHtml(error_message_html)
             else: self.preview.setHtml(error_message_html)
 
@@ -404,26 +670,22 @@ class MarkdownEditorWidget(QWidget):
         if show_preview:
             if not self.is_preview_mode or self.stacked_widget.currentWidget() != self.preview:
                 current_editor_text = self.editor.toPlainText()
-                self._render_preview_html(current_editor_text)
-                current_block_number = self.editor.textCursor().blockNumber()
-                def apply_preview_settings():
-                    if self.preview.page():
-                        self.preview.page().runJavaScript("document.body.contentEditable = 'true';")
-                        scroll_js = (f"const targetElement = document.querySelector('[data-source-line=\"{current_block_number}\"]');"
-                                     "if (targetElement) { targetElement.scrollIntoView({ behavior: 'auto', block: 'start' }); }"
-                                     "else { window.scrollTo(0, 0); }")
-                        self.preview.page().runJavaScript(scroll_js)
-                        self.preview.setFocus()
-                QTimer.singleShot(200, apply_preview_settings)
+                # Store current block number for scrolling after load
+                self._scroll_to_block_on_preview_load = self.editor.textCursor().blockNumber() 
+                self._render_preview_html(current_editor_text) # This will trigger loadFinished
+                
                 self.stacked_widget.setCurrentIndex(self.preview_page_index)
+                self._pending_preview_setup = True # Set flag for _on_preview_load_finished
                 self.is_preview_mode = True; mode_actually_changed = True
         else: 
             if self.is_preview_mode or self.stacked_widget.currentWidget() != self.editor_area_widget: # Check against editor_area_widget
                 if self.preview.page():
-                    self.preview.page().runJavaScript("document.body.contentEditable = 'false';")
-                    # Get scroll position from preview and apply to editor, but DO NOT sync content from preview
+                    # Disable editing when switching away from preview
+                    self.preview.page().runJavaScript("if(document.body) document.body.contentEditable = 'false';")
+                    # Get scroll position from preview and apply to editor
                     self.preview.page().runJavaScript("[window.scrollY, document.documentElement.scrollHeight];", self._apply_preview_scroll_to_editor)
                 
+                self._pending_preview_setup = False # Ensure flag is reset
                 self.stacked_widget.setCurrentIndex(self.editor_page_index) # Switch to editor_area_widget
                 self.editor.setFocus()
                 self.is_preview_mode = False

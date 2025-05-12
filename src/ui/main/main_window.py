@@ -6,7 +6,9 @@ from PyQt6.QtWidgets import (QMainWindow, QApplication, QWidget, QVBoxLayout, QH
                              QStatusBar, QFileDialog, QFontDialog, QColorDialog, QMessageBox,
                               QInputDialog, QSplitter, QTabWidget, QToolButton, QDockWidget, QMenu, QSizePolicy)
 from PyQt6.QtGui import QAction, QFont, QColor, QTextCursor, QIcon, QImage, QTextDocument, QPainter, QKeyEvent, QDragEnterEvent, QDropEvent # Added QDragEnterEvent, QDropEvent
-from PyQt6.QtCore import Qt, QSize, QUrl, QRect, QEvent, pyqtSignal, QPointF, QFile, QTextStream, QPoint, QSignalBlocker, QDateTime, QTimer
+from PyQt6.QtCore import Qt, QSize, QUrl, QRect, QEvent, pyqtSignal, QPointF, QFile, QTextStream, QPoint, QSignalBlocker, QDateTime, QTimer, QStandardPaths
+from PyQt6.QtWebEngineWidgets import QWebEngineView # Added
+from PyQt6.QtWebEngineCore import QWebEnginePage # Added
 
 from ..core.base_widget import BaseWidget
 from .ui_initializer import UIInitializer
@@ -134,8 +136,15 @@ class MainWindow(QMainWindow):
         self.translate_action = QAction("翻译...", self, shortcut="Ctrl+Shift+T", toolTip="翻译", triggered=self.open_translation_dialog_wrapper, enabled=True)
         self.translate_selection_action = QAction("翻译选中内容", self, toolTip="翻译选中内容", triggered=self.translate_selection_wrapper, enabled=False)
         
+        # New actions for context menu
+        self.calculate_selection_action = QAction("计算选中内容", self, toolTip="计算选中的数学表达式", triggered=self.calculate_selection_wrapper, enabled=False)
+        self.copy_to_ai_action = QAction("将选中内容复制到 AI 助手", self, toolTip="将选中文本发送到AI助手输入框", triggered=self.copy_to_ai_wrapper, enabled=False)
+
         # PDF转HTML功能
         self.pdf_to_html_action = QAction("PDF转HTML...", self, toolTip="将PDF转换为HTML", triggered=self.open_pdf_conversion_dialog)
+
+        # Export action
+        self.export_action = QAction("导出...", self, shortcut="Ctrl+E", toolTip="导出当前文件为不同格式", triggered=self.export_file_wrapper, enabled=False)
 
         self.toggle_theme_action = QAction("切换主题", self, shortcut="Ctrl+T", toolTip="切换主题", triggered=self.toggle_theme_wrapper)
         self.zen_action = QAction("Zen Mode", self, checkable=True, shortcut="F11", triggered=self.toggle_zen_mode_wrapper, toolTip="Zen模式")
@@ -174,10 +183,11 @@ class MainWindow(QMainWindow):
     def create_menu_bar(self):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("文件")
-        file_menu.addActions([self.new_action, self.new_html_action, self.new_markdown_action, self.open_action, self.open_folder_action, self.save_action, self.save_as_action, self.close_tab_action, self.exit_action])
+        file_menu.addActions([self.new_action, self.new_html_action, self.new_markdown_action, self.open_action, self.open_folder_action, self.save_action, self.save_as_action, self.export_action, self.close_tab_action, self.exit_action])
         
         edit_menu = menu_bar.addMenu("编辑")
-        edit_menu.addActions([self.undo_action, self.redo_action, self.cut_action, self.copy_action, self.paste_action, self.select_all_action, self.find_action, self.replace_action, self.translate_action, self.translate_selection_action])
+        # Add new actions to edit menu if desired, or they can remain context-menu only
+        edit_menu.addActions([self.undo_action, self.redo_action, self.cut_action, self.copy_action, self.paste_action, self.select_all_action, self.find_action, self.replace_action, self.translate_action, self.translate_selection_action, self.calculate_selection_action, self.copy_to_ai_action])
 
         format_menu = menu_bar.addMenu("格式")
         format_menu.addActions([self.font_action, self.color_action, self.insert_image_action, self.toggle_theme_action, self.pdf_to_html_action])
@@ -222,6 +232,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.save_action)
         file_menu.addAction(self.save_as_action)
+        file_menu.addAction(self.export_action) # Add export to toolbar file menu
         file_menu.addSeparator()
         file_menu.addAction(self.close_tab_action)
         file_menu.addAction(self.exit_action)
@@ -448,6 +459,39 @@ class MainWindow(QMainWindow):
     def translate_selection_wrapper(self):
         if hasattr(self, 'edit_operations'): self.edit_operations.translate_selection()
 
+    def calculate_selection_wrapper(self):
+        if hasattr(self.edit_operations, 'calculate_selection_from_current_editor'):
+            self.edit_operations.calculate_selection_from_current_editor()
+
+    def copy_to_ai_wrapper(self):
+        text = ""
+        editor_widget = self.get_current_editor_widget()
+
+        if editor_widget:
+            if isinstance(editor_widget, QWebEngineView): # For EditableHtmlPreviewWidget and WangEditor's web_view
+                text = editor_widget.selectedText()
+            elif hasattr(editor_widget, 'textCursor'): # For QPlainTextEdit, _InternalTextEdit
+                cursor = editor_widget.textCursor()
+                if cursor.hasSelection():
+                    text = cursor.selectedText()
+        
+        if text.strip():
+            self.toggle_ai_chat_dock(True) 
+            if hasattr(self.ai_chat_dock, 'chat_widget') and hasattr(self.ai_chat_dock.chat_widget, 'input_text'):
+                self.ai_chat_dock.chat_widget.input_text.setPlainText(text)
+                self.ai_chat_dock.chat_widget.input_text.setFocus()
+            else:
+                QMessageBox.warning(self, "错误", "AI助手组件不可用或输入框未找到。")
+        else:
+            if hasattr(self, 'statusBar'):
+                self.statusBar().showMessage("请先选择文本后再复制到AI助手", 3000)
+                
+    def export_file_wrapper(self):
+        if hasattr(self.file_operations, 'export_file'):
+            self.file_operations.export_file()
+        else:
+            QMessageBox.warning(self, "错误", "导出功能尚未实现。")
+
     def toggle_markdown_preview_panel_wrapper(self, checked):
         current_tab_container = self.tab_widget.currentWidget()
         if isinstance(current_tab_container, MarkdownEditorWidget):
@@ -549,7 +593,9 @@ class MainWindow(QMainWindow):
     def zoom_in(self): self.current_zoom_factor=min(self.max_zoom_factor,self.current_zoom_factor+self.zoom_step); self.ui_manager.apply_current_theme(); self._apply_content_zoom_to_current_editor()
     def zoom_out(self): self.current_zoom_factor=max(self.min_zoom_factor,self.current_zoom_factor-self.zoom_step); self.ui_manager.apply_current_theme(); self._apply_content_zoom_to_current_editor()
     def reset_zoom(self): self.current_zoom_factor=1.0; self.ui_manager.apply_current_theme(); self._apply_content_zoom_to_current_editor()
-    def _apply_content_zoom_to_current_editor(self): pass
+    def _apply_content_zoom_to_current_editor(self):
+        # This method might need to be implemented if zoom affects content size in editors
+        pass
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
@@ -677,10 +723,10 @@ class MainWindow(QMainWindow):
 
     def update_edit_actions_state(self, current_widget: QWidget | None):
         all_editor_actions = [
-            self.undo_action, self.redo_action, self.cut_action, self.copy_action, 
-            self.select_all_action, self.font_action, self.color_action, 
-            self.insert_image_action, self.find_action, self.replace_action, 
-            self.translate_selection_action
+            self.undo_action, self.redo_action, self.cut_action, self.copy_action,
+            self.select_all_action, self.font_action, self.color_action,
+            self.insert_image_action, self.find_action, self.replace_action,
+            self.translate_selection_action, self.calculate_selection_action, self.copy_to_ai_action # Add new actions
         ]
         
         current_tab_container = self.tab_widget.currentWidget() if self.tab_widget else None
@@ -700,105 +746,96 @@ class MainWindow(QMainWindow):
 
         # 初始化所有编辑操作为禁用状态
         for action in all_editor_actions: action.setEnabled(False)
-        self.save_action.setEnabled(False) # 初始化保存按钮为禁用
-        self.save_as_action.setEnabled(False) # 初始化另存为按钮为禁用
+        self.save_action.setEnabled(False)
+        self.save_as_action.setEnabled(False)
+        self.export_action.setEnabled(False) # Initialize export action
         self.paste_action.setEnabled(False)
         self.close_tab_action.setEnabled(self.tab_widget.count() > 0 if self.tab_widget else False)
         
-        # 如果没有打开的标签页，直接返回
         if not current_tab_container:
-            return
-            
-        # 对于所有类型的编辑器，都可以使用另存为功能
+            return # No tab open, all relevant actions remain disabled
+
+        # Actions that are enabled if any tab is open
         self.save_as_action.setEnabled(True)
-        
-        # Handle HtmlViewContainer
-        if is_html_view_container:
-            is_modified = current_tab_container.is_modified()
-            self.save_action.setEnabled(is_modified)
+        self.export_action.setEnabled(True) # Enable export if a tab is open
 
-            self.toggle_html_view_action.setEnabled(True) # Main toggle for HTML container
-            # Visual edit action is removed
-            
-            # Enable text editing actions if current internal editor is TextEditor part of HtmlViewContainer
-            internal_editor = current_tab_container.get_current_actual_editor()
-            if isinstance(internal_editor, _InternalTextEdit): # Check for the QPlainTextEdit
-                is_writable_internal = not internal_editor.isReadOnly()
-                doc_internal = internal_editor.document()
-                if doc_internal:
-                    self.undo_action.setEnabled(doc_internal.isUndoAvailable())
-                    self.redo_action.setEnabled(doc_internal.isRedoAvailable())
-                has_selection_internal = internal_editor.textCursor().hasSelection()
-                self.cut_action.setEnabled(has_selection_internal and is_writable_internal)
-                self.copy_action.setEnabled(has_selection_internal)
-                self.translate_selection_action.setEnabled(has_selection_internal)
-                self.select_all_action.setEnabled(True)
-                self.find_action.setEnabled(True); self.replace_action.setEnabled(True)
-                self.font_action.setEnabled(True); self.color_action.setEnabled(True)
-                # Paste for internal text editor
-                clipboard_internal = QApplication.clipboard()
-                can_paste_internal = bool(clipboard_internal.text()) and internal_editor.canPaste()
-                self.paste_action.setEnabled(can_paste_internal)
+        has_selection = False
+        is_writable = True # Assume writable unless determined otherwise
+        doc = None
 
-            # Disable Markdown specific toggle
-            self.toggle_markdown_preview_action.setEnabled(False)
-            return # Handled HtmlViewContainer
+        if isinstance(current_widget, QWebEngineView): # Handles EditableHtmlPreviewWidget and WangEditor's web_view
+            has_selection = current_widget.hasSelection()
+            # QWebEngineView doesn't have a direct document() or isReadOnly() like QTextEdit.
+            # Undo/redo/cut/copy/paste are handled by QWebEnginePage actions, their enabled state is managed by the page.
+            # We can try to reflect this, but it's often simpler to just enable them and let the page handle it.
+            self.undo_action.setEnabled(current_widget.page().action(QWebEnginePage.WebAction.Undo).isEnabled())
+            self.redo_action.setEnabled(current_widget.page().action(QWebEnginePage.WebAction.Redo).isEnabled())
+            self.cut_action.setEnabled(current_widget.page().action(QWebEnginePage.WebAction.Cut).isEnabled() and has_selection)
+            self.copy_action.setEnabled(current_widget.page().action(QWebEnginePage.WebAction.Copy).isEnabled() and has_selection)
+            self.paste_action.setEnabled(current_widget.page().action(QWebEnginePage.WebAction.Paste).isEnabled())
+            self.select_all_action.setEnabled(current_widget.page().action(QWebEnginePage.WebAction.SelectAll).isEnabled())
+            # Font, color, insert image might need JS interaction for web views
+            self.font_action.setEnabled(False) 
+            self.color_action.setEnabled(False)
+            self.insert_image_action.setEnabled(False) # WangEditor handles its own image insertion
+            self.find_action.setEnabled(True) # Web view has find
+            self.replace_action.setEnabled(False) # Replace is more complex in web views
 
-        # For other known editors (Markdown, WangEditor if separate, etc.)
-        # current_widget here is the actual editor part (e.g., Markdown's QPlainTextEdit)
-        if is_known_editor: # This 'is_known_editor' now applies to Markdown's editor, WangEditor's internal
-            is_writable = not current_widget.isReadOnly() if hasattr(current_widget, 'isReadOnly') else True
-            doc = current_widget.document() if hasattr(current_widget, 'document') else None
+            # Save action for web views (e.g. HtmlViewContainer in preview, WangEditor in rich text)
+            if isinstance(current_tab_container, HtmlViewContainer):
+                self.save_action.setEnabled(current_tab_container.is_modified())
+            elif isinstance(current_tab_container, WangEditor):
+                 self.save_action.setEnabled(current_tab_container.isModified())
+
+
+        elif hasattr(current_widget, 'document'): # Handles _InternalTextEdit, Markdown's editor, WangEditor's source_code_editor
+            doc = current_widget.document()
             if doc:
                 self.undo_action.setEnabled(doc.isUndoAvailable())
                 self.redo_action.setEnabled(doc.isRedoAvailable())
-                self.save_action.setEnabled(doc.isModified() and is_writable)
+                self.save_action.setEnabled(doc.isModified())
             
-            has_selection = current_widget.textCursor().hasSelection() if hasattr(current_widget, 'textCursor') else False
-            self._update_copy_cut_state(has_selection and is_writable) # Cut only if writable
-            self.copy_action.setEnabled(has_selection) # Copy always if selection
-            self.translate_selection_action.setEnabled(has_selection)
-            self.select_all_action.setEnabled(True)
-            self.find_action.setEnabled(True); self.replace_action.setEnabled(True)
-            self.font_action.setEnabled(True); self.color_action.setEnabled(True)
-            # insert_image_action is usually for rich text, disable for plain/code. WangEditor handles its own.
-            self.insert_image_action.setEnabled(isinstance(current_widget, QTextEdit) and not isinstance(current_widget, _InternalTextEdit))
+            if hasattr(current_widget, 'textCursor'):
+                has_selection = current_widget.textCursor().hasSelection()
+            
+            if hasattr(current_widget, 'isReadOnly'):
+                is_writable = not current_widget.isReadOnly()
 
-        # 特殊处理WangEditor
-        elif is_wang_editor_tab:
-            # WangEditor有自己的修改状态跟踪
-            is_modified = False
-            if hasattr(current_tab_container, 'isModified') and callable(current_tab_container.isModified):
-                is_modified = current_tab_container.isModified()
-            self.save_action.setEnabled(is_modified)
-            
-            # 启用基本编辑功能
-            self.select_all_action.setEnabled(True)
+            self.cut_action.setEnabled(has_selection and is_writable)
+            self.copy_action.setEnabled(has_selection)
+            self.select_all_action.setEnabled(True) # Always possible for text editors
             self.find_action.setEnabled(True)
-            self.replace_action.setEnabled(True)
+            self.replace_action.setEnabled(is_writable)
+            self.font_action.setEnabled(is_writable)
+            self.color_action.setEnabled(is_writable)
+            # Enable insert image only for _InternalTextEdit (which is QTextEdit based)
+            self.insert_image_action.setEnabled(isinstance(current_widget, _InternalTextEdit) and is_writable)
+            
+            clipboard = QApplication.clipboard()
+            can_paste_text = clipboard.mimeData().hasText() and hasattr(current_widget, 'canPaste') and current_widget.canPaste()
+            self.paste_action.setEnabled(can_paste_text and is_writable)
 
-        # Paste action
-        clipboard = QApplication.clipboard()
-        can_paste = bool(clipboard.text())
-        if is_known_editor and hasattr(current_widget, 'canPaste') and callable(current_widget.canPaste):
-            can_paste = can_paste and current_widget.canPaste()
-        self.paste_action.setEnabled(can_paste and is_known_editor)
 
-        # View toggles for non-HtmlViewContainer tabs
+        # Update selection-dependent actions
+        self.translate_selection_action.setEnabled(has_selection)
+        self.calculate_selection_action.setEnabled(has_selection)
+        self.copy_to_ai_action.setEnabled(has_selection)
+
+        # View toggles
         self.toggle_markdown_preview_action.setEnabled(is_markdown_tab)
-        if is_markdown_tab: 
+        if is_markdown_tab:
             self.toggle_markdown_preview_action.setChecked(current_tab_container.is_preview_mode)
         
-        # If WangEditor has its own toggle, handle it here
+        self.toggle_html_view_action.setEnabled(is_html_view_container_tab)
+        # If WangEditor has its own toggle, handle it here (assuming it's not the primary HTML editor now)
         # self.toggle_html_preview_action.setEnabled(is_wang_editor_tab) 
         # if is_wang_editor_tab: 
         #     is_source_mode_wang = (current_tab_container._current_editor_mode == 0)
         #     self.toggle_html_preview_action.setChecked(is_source_mode_wang)
-
+        
         # Ensure HTML specific toggles are disabled if not an HTML container
-        if not is_html_view_container:
+        if not is_html_view_container_tab:
             self.toggle_html_view_action.setEnabled(False)
-            # self.toggle_html_visual_edit_action.setEnabled(False) # Visual edit action removed
     
     def handle_html_container_modification(self, modified: bool):
         """Slot to connect to HtmlViewContainer.internalModificationChanged."""

@@ -2,10 +2,12 @@ import base64 # For image pasting
 from PyQt6.QtWidgets import QInputDialog, QMessageBox, QFileDialog, QApplication # Add QApplication
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtCore import QUrl, QBuffer, QByteArray, Qt # Add QBuffer, QByteArray
+from PyQt6.QtWebEngineWidgets import QWebEngineView # Added for type checking
 from src.services.format_service import FormatService
 # Import editor types for direct checking
-from ..atomic.editor.html_editor import HtmlEditor
+from ..atomic.editor.html_editor import HtmlEditor # Though HtmlEditor itself might be less used directly
 from ..atomic.editor.text_editor import _InternalTextEdit # Import the internal class
+from ..atomic.mini_tools.calculator_widget import ExpressionEvaluator # For calculation
 import os
 
 # 替换翻译对话框导入为可拖拽的翻译窗口
@@ -379,3 +381,85 @@ class EditOperations:
         # 打开翻译窗口并设置文本
         self.open_translation_dialog()
         self.translation_dock.set_text(selected_text)
+
+    def calculate_selection_from_current_editor(self):
+        """计算当前编辑器中选中的数学表达式，并用结果替换选区。"""
+        editor_widget = self.main_window.get_current_editor_widget()
+        if not editor_widget:
+            if hasattr(self.main_window, 'statusBar'):
+                self.main_window.statusBar().showMessage("没有活动的编辑器。", 3000)
+            return
+
+        selected_text = ""
+        is_web_editor = False
+
+        if isinstance(editor_widget, QWebEngineView): # Handles EditableHtmlPreviewWidget and WangEditor's web_view
+            selected_text = editor_widget.selectedText().strip()
+            is_web_editor = True
+        elif hasattr(editor_widget, 'textCursor'): # Handles _InternalTextEdit, Markdown's editor, WangEditor's source_code_editor
+            cursor = editor_widget.textCursor()
+            if cursor.hasSelection():
+                selected_text = cursor.selectedText().strip()
+        
+        if not selected_text:
+            if hasattr(self.main_window, 'statusBar'):
+                self.main_window.statusBar().showMessage("请选择要计算的表达式。", 3000)
+            return
+
+        try:
+            evaluator = ExpressionEvaluator() 
+            result = evaluator.evaluate(selected_text)
+            
+            if isinstance(result, float) and result.is_integer():
+                result_str = str(int(result))
+            elif isinstance(result, float):
+                result_str = f"{result:g}" # General format for floats
+            else: # int, or other types
+                result_str = str(result)
+            
+            final_text_to_insert = f"{selected_text} = {result_str}"
+
+            if is_web_editor:
+                escaped_insert_text = final_text_to_insert.replace("'", "\\'").replace("\n", "\\n")
+                js_code = f"""
+                    var sel = window.getSelection();
+                    if (sel.rangeCount > 0) {{
+                        var range = sel.getRangeAt(0);
+                        range.deleteContents();
+                        range.insertNode(document.createTextNode('{escaped_insert_text}'));
+                        // Attempt to trigger an input event for frameworks or contentEditable listeners
+                        var event = new Event('input', {{ bubbles: true, cancelable: true }});
+                        range.commonAncestorContainer.dispatchEvent(event);
+                    }}
+                """
+                editor_widget.page().runJavaScript(js_code)
+                # For web editors, explicitly mark parent container as modified if possible
+                current_tab_container = self.main_window.tab_widget.currentWidget()
+                if hasattr(current_tab_container, 'internalModificationChanged'):
+                    current_tab_container.internalModificationChanged.emit(True)
+                elif hasattr(current_tab_container, 'setModified'): # e.g. WangEditor
+                    current_tab_container.setModified(True)
+
+
+            elif hasattr(editor_widget, 'textCursor'): 
+                cursor = editor_widget.textCursor()
+                # Ensure no part of the old selection remains if insertText doesn't fully replace
+                cursor.beginEditBlock()
+                cursor.removeSelectedText() 
+                cursor.insertText(final_text_to_insert)
+                cursor.endEditBlock()
+            
+            # Try to mark document as modified
+            if hasattr(editor_widget, 'document') and callable(editor_widget.document):
+                doc = editor_widget.document()
+                if doc: doc.setModified(True)
+            # For HtmlViewContainer, the internalModificationChanged signal should handle tab title.
+            # For WangEditor, its own setModified should trigger necessary updates.
+
+            if hasattr(self.main_window, 'statusBar'):
+                self.main_window.statusBar().showMessage(f"计算结果: {final_text_to_insert}", 3000)
+
+        except Exception as e:
+            if hasattr(self.main_window, 'statusBar'):
+                self.main_window.statusBar().showMessage(f"计算错误: {e}", 3000)
+            print(f"Error evaluating expression '{selected_text}': {e}")

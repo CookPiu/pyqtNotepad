@@ -254,7 +254,7 @@ class _InternalTextEdit(ResizableImageTextEdit):
         has_selection = self.textCursor().hasSelection()
         if has_selection:
             menu.addSeparator()
-            # 添加翻译选项
+            # 添加翻译选中内容选项 (确保只有一个)
             translate_action = menu.addAction("翻译选中内容")
             if main_window and hasattr(main_window, 'translate_selection_wrapper'):
                 translate_action.triggered.connect(main_window.translate_selection_wrapper)
@@ -264,8 +264,23 @@ class _InternalTextEdit(ResizableImageTextEdit):
             
             # 添加计算选中内容选项
             calculate_action = menu.addAction("计算选中内容")
-            calculate_action.triggered.connect(self._calculate_selection)
-            # calculate_action is enabled by default if has_selection is true
+            if main_window and hasattr(main_window, 'calculate_selection_wrapper'):
+                calculate_action.triggered.connect(main_window.calculate_selection_wrapper)
+            else:
+                # Fallback or disable if main_window or wrapper is not found
+                # For now, let's try to connect to the internal one if main_window logic isn't there,
+                # but ideally, it should always go through MainWindow.
+                # calculate_action.triggered.connect(self._calculate_selection) # Old direct call
+                calculate_action.setEnabled(False) 
+                print("Warning: Could not connect calculate_selection to MainWindow wrapper.")
+
+            # 添加“将选中内容复制到 AI 助手”选项
+            ai_action = menu.addAction("将选中内容复制到 AI 助手")
+            if main_window and hasattr(main_window, 'copy_to_ai_wrapper'):
+                ai_action.triggered.connect(main_window.copy_to_ai_wrapper)
+            else:
+                ai_action.setEnabled(False)
+            # ai_action.setEnabled(has_selection) # Already inside if has_selection block
 
         menu.exec(event.globalPos())
 

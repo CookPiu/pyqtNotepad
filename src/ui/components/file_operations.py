@@ -16,6 +16,7 @@ from ..views.video_player_view import VideoPlayerWidget
 # from ..views.editable_html_preview_widget import EditableHtmlPreviewWidget 
 from ..composite.html_view_container import HtmlViewContainer, HTML_SKELETON # Import new container
 from ..views.editable_html_preview_widget import EditableHtmlPreviewWidget # For type checking
+from PyQt6.QtGui import QTextDocument # Added for HTML to Text conversion
 
 
 class FileOperations:
@@ -533,3 +534,125 @@ class FileOperations:
                 target_tab_w_resolved.removeTab(target_tab_w_resolved.indexOf(editor_container_to_add))
                 editor_container_to_add.deleteLater()
             return None
+
+    def export_file(self):
+        active_editor_group = self.ui_manager.get_active_editor_group()
+        current_tab_widget = active_editor_group.get_tab_widget() if active_editor_group else self.main_window.tab_widget
+        if not current_tab_widget:
+            QMessageBox.warning(self.main_window, "导出错误", "没有活动的标签页可以导出。")
+            return
+
+        current_tab_container = current_tab_widget.currentWidget()
+        if not current_tab_container:
+            QMessageBox.warning(self.main_window, "导出错误", "当前标签页没有内容可以导出。")
+            return
+
+        original_file_path = current_tab_container.property("file_path")
+        untitled_name = current_tab_container.property("untitled_name")
+        workspace_path = current_tab_container.property("workspace_path")
+        
+        suggested_name_base, original_ext = os.path.splitext(os.path.basename(original_file_path) if original_file_path else (untitled_name or "untitled"))
+        
+        default_dir = os.path.dirname(original_file_path) if original_file_path else (workspace_path or os.getcwd())
+        
+        possible_filters_list = []
+        default_export_filter = ""
+        default_export_extension = ""
+
+        if isinstance(current_tab_container, MarkdownEditorWidget):
+            possible_filters_list = ["Markdown 文件 (*.md)", "文本文件 (*.txt)", "HTML 文件 (*.html)"]
+            default_export_filter = "Markdown 文件 (*.md)"
+            default_export_extension = ".md"
+        elif isinstance(current_tab_container, HtmlViewContainer):
+            possible_filters_list = ["HTML 文件 (*.html)", "文本文件 (*.txt)"]
+            default_export_filter = "HTML 文件 (*.html)"
+            default_export_extension = ".html"
+        elif isinstance(current_tab_container, WangEditor): # Primarily for .txt
+            possible_filters_list = ["文本文件 (*.txt)", "HTML 文件 (*.html)"]
+            default_export_filter = "文本文件 (*.txt)" # Default to TXT as WangEditor is used for TXT
+            default_export_extension = ".txt"
+        else: # Fallback for other types (e.g. direct TextEditor, though less common now)
+            possible_filters_list = ["文本文件 (*.txt)", "所有文件 (*)"]
+            default_export_filter = "文本文件 (*.txt)"
+            default_export_extension = ".txt"
+
+        filters_string = ";;".join(possible_filters_list)
+        suggested_full_name = f"{suggested_name_base}{default_export_extension}"
+        
+        file_path_to_export, selected_filter = QFileDialog.getSaveFileName(
+            self.main_window, "导出文件为...", os.path.join(default_dir, suggested_full_name), filters_string, default_export_filter
+        )
+
+        if not file_path_to_export:
+            return
+
+        content_to_export = ""
+        # actual_editor_component = self.main_window.get_current_editor_widget() # May not be needed if we get content from container
+
+        # Get raw content based on editor type
+        raw_content = ""
+        is_html_source = False # Flag to indicate if raw_content is HTML
+
+        if isinstance(current_tab_container, MarkdownEditorWidget):
+            raw_content = current_tab_container.get_content() # This is Markdown source
+        elif isinstance(current_tab_container, HtmlViewContainer):
+            raw_content = current_tab_container.get_content_for_saving() # This is HTML source
+            is_html_source = True
+        elif isinstance(current_tab_container, WangEditor):
+            # WangEditor's getHtml() is asynchronous, which is problematic for direct save.
+            # For export, it's better if WangEditor can provide its HTML synchronously.
+            # The current WangEditor in the project (wangEditor/wang_editor.py) has a synchronous getHtml via a bridge.
+            # Let's assume the bridge's getCurrentHtml() is what we need.
+            # If WangEditor is the one from the project root:
+            if hasattr(current_tab_container, '_bridge') and hasattr(current_tab_container._bridge, 'getCurrentHtml'):
+                 raw_content = current_tab_container._bridge.getCurrentHtml()
+            elif hasattr(current_tab_container, 'getHtml') and not callable(getattr(current_tab_container, 'getHtml', None)): # Check if getHtml is a property
+                 raw_content = current_tab_container.getHtml # If it's a simple property
+            else: # Fallback if direct sync access isn't obvious, might need JS call
+                 QMessageBox.warning(self.main_window, "导出警告", "无法同步获取WangEditor内容进行导出。可能需要JS交互。")
+                 return # Or try to use its internal _on_export_file logic if possible
+            is_html_source = True
+        elif hasattr(current_tab_container, 'toPlainText'): # Fallback for simple text editors (e.g. TextEditor container)
+            raw_content = current_tab_container.toPlainText()
+        else:
+            QMessageBox.warning(self.main_window, "导出错误", "不支持的编辑器类型，无法获取内容。")
+            return
+
+        # Convert content based on selected_filter
+        if selected_filter == "文本文件 (*.txt)" or file_path_to_export.lower().endswith(".txt"):
+            if is_html_source: # HTML to TXT
+                doc = QTextDocument()
+                doc.setHtml(raw_content)
+                content_to_export = doc.toPlainText()
+            elif isinstance(current_tab_container, MarkdownEditorWidget): # Markdown to TXT
+                # For simplicity, exporting Markdown as TXT means saving the raw Markdown source.
+                # More complex stripping would require MD->HTML->TXT.
+                content_to_export = raw_content
+            else: # Already plain text
+                content_to_export = raw_content
+        elif selected_filter == "HTML 文件 (*.html)" or file_path_to_export.lower().endswith(".html"):
+            if isinstance(current_tab_container, MarkdownEditorWidget):
+                from markdown_it import MarkdownIt # Local import for safety
+                md_parser = MarkdownIt()
+                content_to_export = md_parser.render(raw_content)
+            elif is_html_source: # Already HTML
+                content_to_export = raw_content
+            else: # Plain text to HTML (basic wrapping)
+                escaped_text = raw_content.replace("&", "&").replace("<", "<").replace(">", ">")
+                content_to_export = f"<!DOCTYPE html><html><head><title>Exported Text</title></head><body><pre>{escaped_text}</pre></body></html>"
+        elif selected_filter == "Markdown 文件 (*.md)" or file_path_to_export.lower().endswith((".md", ".markdown")):
+            if isinstance(current_tab_container, MarkdownEditorWidget):
+                content_to_export = raw_content # Already MD
+            else:
+                QMessageBox.warning(self.main_window, "导出格式不兼容", f"无法直接将当前内容导出为 Markdown。\n请选择其他格式或手动转换。")
+                return
+        else: # "所有文件" or unknown filter, assume raw content is fine for its original type
+            content_to_export = raw_content
+            
+        try:
+            with open(file_path_to_export, 'w', encoding='utf-8') as f:
+                f.write(content_to_export)
+            if hasattr(self.main_window, 'statusBar'):
+                self.main_window.statusBar.showMessage(f"文件已导出到: {file_path_to_export}", 5000)
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "导出失败", f"无法导出文件到 '{file_path_to_export}':\n{str(e)}")

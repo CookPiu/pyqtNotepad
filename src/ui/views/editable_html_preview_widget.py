@@ -5,10 +5,12 @@ from PyQt6.QtWebEngineCore import (
     QWebEnginePage, 
     QWebEngineSettings, 
     QWebEngineUrlRequestInterceptor,
-    QWebEngineProfile
+    QWebEngineProfile,
+    QWebEnginePage # Added
 )
 from PyQt6.QtWebChannel import QWebChannel
-from PyQt6.QtWidgets import QSizePolicy
+from PyQt6.QtWidgets import QSizePolicy, QMenu, QApplication, QMainWindow # Added QMenu, QApplication, QMainWindow
+from PyQt6.QtGui import QAction # Added QAction
 
 class HtmlBridge(QObject):
     htmlChanged = pyqtSignal(str)
@@ -67,7 +69,8 @@ class EditableHtmlPreviewWidget(QWebEngineView):
 
         self._is_editing_enabled = False 
         self._page_fully_loaded = False # Flag to track if loadFinished has occurred
-        
+        self.main_window_ref = parent.main_window if hasattr(parent, 'main_window') else None # Store main_window_ref if parent (HtmlViewContainer) has it
+
         self.loadStarted.connect(self._on_load_started)
         self.loadProgress.connect(self._on_load_progress)
         self.loadFinished.connect(self._on_load_finished)
@@ -76,6 +79,78 @@ class EditableHtmlPreviewWidget(QWebEngineView):
         # page_obj.javaScriptConsoleMessage.connect(self._handle_js_console_message)
         print("DEBUG EditableHtmlPreviewWidget: Skipped connecting page_obj.javaScriptConsoleMessage for now.")
         page_obj.certificateError.connect(self._handle_certificate_error)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        # Try to get MainWindow instance from stored ref or by traversing parent
+        main_window = self.main_window_ref 
+        if not isinstance(main_window, QMainWindow):
+            parent_widget = self.parent()
+            while parent_widget:
+                if isinstance(parent_widget, QMainWindow):
+                    main_window = parent_widget
+                    break
+                # Check if parent_widget has a main_window attribute (like HtmlViewContainer might)
+                if hasattr(parent_widget, 'main_window') and isinstance(parent_widget.main_window, QMainWindow):
+                    main_window = parent_widget.main_window
+                    break
+                parent_widget = parent_widget.parent()
+
+        # Standard Web Actions
+        action_undo = self.page().action(QWebEnginePage.WebAction.Undo)
+        action_undo.setText("撤销")
+        menu.addAction(action_undo)
+
+        action_redo = self.page().action(QWebEnginePage.WebAction.Redo)
+        action_redo.setText("重做")
+        menu.addAction(action_redo)
+        
+        menu.addSeparator()
+        
+        action_cut = self.page().action(QWebEnginePage.WebAction.Cut)
+        action_cut.setText("剪切")
+        menu.addAction(action_cut)
+        
+        action_copy = self.page().action(QWebEnginePage.WebAction.Copy)
+        action_copy.setText("复制")
+        menu.addAction(action_copy)
+        
+        action_paste = self.page().action(QWebEnginePage.WebAction.Paste)
+        action_paste.setText("粘贴")
+        menu.addAction(action_paste)
+        
+        menu.addSeparator()
+        
+        action_select_all = self.page().action(QWebEnginePage.WebAction.SelectAll)
+        action_select_all.setText("全选")
+        menu.addAction(action_select_all)
+
+        has_selection = self.hasSelection()
+        if has_selection:
+            menu.addSeparator()
+            
+            translate_action = menu.addAction("翻译选中内容")
+            if main_window and hasattr(main_window, 'translate_selection_wrapper'):
+                translate_action.triggered.connect(main_window.translate_selection_wrapper)
+            else:
+                translate_action.setEnabled(False)
+                print("EditableHtmlPreviewWidget: Warning - Could not connect translate to MainWindow wrapper.")
+
+            calc_action = menu.addAction("计算选中内容")
+            if main_window and hasattr(main_window, 'calculate_selection_wrapper'):
+                calc_action.triggered.connect(main_window.calculate_selection_wrapper)
+            else:
+                calc_action.setEnabled(False)
+                print("EditableHtmlPreviewWidget: Warning - Could not connect calculate to MainWindow wrapper.")
+
+            ai_action = menu.addAction("将选中内容复制到 AI 助手")
+            if main_window and hasattr(main_window, 'copy_to_ai_wrapper'):
+                ai_action.triggered.connect(main_window.copy_to_ai_wrapper)
+            else:
+                ai_action.setEnabled(False)
+                print("EditableHtmlPreviewWidget: Warning - Could not connect copy_to_ai to MainWindow wrapper.")
+
+        menu.exec(event.globalPos())
 
     def _on_load_started(self):
         print("EditableHtmlPreviewWidget: Load started.")
