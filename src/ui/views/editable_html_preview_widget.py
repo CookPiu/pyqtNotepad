@@ -150,6 +150,19 @@ class EditableHtmlPreviewWidget(QWebEngineView):
                 ai_action.setEnabled(False)
                 print("EditableHtmlPreviewWidget: Warning - Could not connect copy_to_ai to MainWindow wrapper.")
 
+            # Add "Fetch URL Source" action
+            selected_text_for_url = self.selectedText().strip()
+            if selected_text_for_url:
+                is_potential_url = selected_text_for_url.startswith("http://") or selected_text_for_url.startswith("https://")
+                if is_potential_url:
+                    menu.addSeparator()
+                    fetch_action = menu.addAction("打开并抓取源码(Web视图)")
+                    if main_window and hasattr(main_window, 'fetch_url_source_wrapper'):
+                        fetch_action.triggered.connect(main_window.fetch_url_source_wrapper)
+                    else:
+                        fetch_action.setEnabled(False)
+                        print("EditableHtmlPreviewWidget: Warning - Could not connect fetch_url_source to MainWindow wrapper.")
+
         menu.exec(event.globalPos())
 
     def _on_load_started(self):

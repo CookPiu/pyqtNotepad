@@ -282,6 +282,19 @@ class _InternalTextEdit(ResizableImageTextEdit):
                 ai_action.setEnabled(False)
             # ai_action.setEnabled(has_selection) # Already inside if has_selection block
 
+            # Add "Fetch URL Source" action
+            selected_text_for_url = self.textCursor().selectedText().strip()
+            if selected_text_for_url:
+                # Basic check if it might be a URL; MainWindow will do more robust validation
+                is_potential_url = selected_text_for_url.startswith("http://") or selected_text_for_url.startswith("https://")
+                if is_potential_url:
+                    menu.addSeparator()
+                    fetch_action = menu.addAction("打开并抓取源码(Web视图)")
+                    if main_window and hasattr(main_window, 'fetch_url_source_wrapper'):
+                        fetch_action.triggered.connect(main_window.fetch_url_source_wrapper)
+                    else:
+                        fetch_action.setEnabled(False)
+
         menu.exec(event.globalPos())
 
     def _calculate_selection(self):

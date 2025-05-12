@@ -399,6 +399,18 @@ class MarkdownEditorWidget(QWidget):
             else:
                 ai_action.setEnabled(False)
                 print("MarkdownEditorWidget: Warning - Could not connect copy_to_ai to MainWindow wrapper.")
+
+            # Add "Fetch URL Source" action for source editor
+            selected_text_for_url = self.editor.textCursor().selectedText().strip()
+            if selected_text_for_url:
+                is_potential_url = selected_text_for_url.startswith("http://") or selected_text_for_url.startswith("https://")
+                if is_potential_url:
+                    menu.addSeparator()
+                    fetch_action = menu.addAction("打开并抓取源码(Web视图)")
+                    if main_window and hasattr(main_window, 'fetch_url_source_wrapper'):
+                        fetch_action.triggered.connect(main_window.fetch_url_source_wrapper)
+                    else:
+                        fetch_action.setEnabled(False)
         
         menu.exec(self.editor.mapToGlobal(position))
 
@@ -470,6 +482,18 @@ class MarkdownEditorWidget(QWidget):
             else:
                 ai_action.setEnabled(False)
                 print("MarkdownPreview: Warning - Could not connect copy_to_ai to MainWindow wrapper.")
+
+            # Add "Fetch URL Source" action for preview
+            selected_text_for_url_preview = self.preview.selectedText().strip()
+            if selected_text_for_url_preview:
+                is_potential_url_preview = selected_text_for_url_preview.startswith("http://") or selected_text_for_url_preview.startswith("https://")
+                if is_potential_url_preview:
+                    menu.addSeparator()
+                    fetch_action_preview = menu.addAction("打开并抓取源码(Web视图)")
+                    if main_window and hasattr(main_window, 'fetch_url_source_wrapper'):
+                        fetch_action_preview.triggered.connect(main_window.fetch_url_source_wrapper)
+                    else:
+                        fetch_action_preview.setEnabled(False)
         
         menu.exec(self.preview.mapToGlobal(position))
 

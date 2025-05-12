@@ -5,8 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>wangEditor</title>
-  <link href="node_modules/@wangeditor/editor/dist/css/style.css"
-    rel="stylesheet" />
+  <link href="node_modules/@wangeditor/editor/dist/css/style.css" rel="stylesheet" />
   <style>
     html,
     body {
@@ -198,6 +197,33 @@
 
     window.getHtmlContent = function () {
       return editor.getHtml()
+    }
+
+    window.replaceSelectionWithText = function (textToInsert) {
+      if (editor && typeof editor.deleteFragment === 'function' && typeof editor.insertText === 'function') {
+        try {
+          // 1. 如果有选区，先删除选区内容
+          // WangEditor v5 推荐使用 editor.dangerouslyInsertHtml('') 来清空选区再插入，或者 editor.restoreSelection() 后操作
+          // 但更直接的方式可能是先判断是否有选区文本
+          const selectionText = editor.selection.getSelectionText();
+          if (selectionText) {
+            editor.deleteFragment(); // 删除选区
+          }
+          // 2. 插入新文本
+          editor.insertText(textToInsert);
+          console.log('[editor.html] replaceSelectionWithText executed with:', textToInsert);
+
+          // 触发内容变更，以便pyqtBridge可以捕获
+          if (editorConfig.onChange) {
+            editorConfig.onChange(editor); // 手动调用onChange来通知Python
+          }
+
+        } catch (e) {
+          console.error('[editor.html] Error in replaceSelectionWithText:', e);
+        }
+      } else {
+        console.error('[editor.html] WangEditor "editor" instance or required methods (deleteFragment, insertText) not found for replaceSelectionWithText.');
+      }
     }
 
     // 文件导入功能

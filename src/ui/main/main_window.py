@@ -17,6 +17,7 @@ from ..components.edit_operations import EditOperations
 from ..components.view_operations import ViewOperations
 from ..components.ui_manager import UIManager
 from ..docks.optimized_ai_chat_dock import OptimizedAIChatDock  # 导入优化的AI聊天组件
+from ...services.network_service import NetworkService # Added for fetching URL source
 # PDF转换服务现在直接在open_pdf_conversion_dialog方法中导入
 
 # from ..atomic.editor.html_editor import HtmlEditor # No longer primary HTML editor
@@ -51,6 +52,7 @@ class MainWindow(QMainWindow):
         self.file_operations = FileOperations(self, self.ui_manager, None) 
         self.edit_operations = EditOperations(self, self.ui_manager)
         self.view_operations = ViewOperations(self, self.ui_manager)
+        self.network_service = NetworkService(self) # Instantiate NetworkService
 
         self.base_font_size_pt = 10.0
         self.current_zoom_factor = 1.0
@@ -62,8 +64,12 @@ class MainWindow(QMainWindow):
         self.previous_editor = None 
         self.setDockOptions(QMainWindow.DockOption.AllowTabbedDocks | QMainWindow.DockOption.AnimatedDocks)
         
-        self.create_actions()
+        self.create_actions() # Actions must be created before UI setup if UI uses them
         self.ui_initializer.setup_ui() 
+        
+        # Connect NetworkService signals
+        self.network_service.html_fetched.connect(self._handle_html_fetched)
+        self.network_service.fetch_error.connect(self._handle_fetch_error)
         
         if hasattr(self, 'file_explorer') and self.file_explorer:
             self.file_explorer.root_path_changed.connect(self.on_workspace_changed)
@@ -146,6 +152,9 @@ class MainWindow(QMainWindow):
         # Export action
         self.export_action = QAction("导出...", self, shortcut="Ctrl+E", toolTip="导出当前文件为不同格式", triggered=self.export_file_wrapper, enabled=False)
 
+        # Fetch URL source action
+        self.fetch_url_source_action = QAction("打开并抓取源码(Web视图)", self, toolTip="抓取选中URL的源码并在新标签页显示", triggered=self.fetch_url_source_wrapper, enabled=False)
+
         self.toggle_theme_action = QAction("切换主题", self, shortcut="Ctrl+T", toolTip="切换主题", triggered=self.toggle_theme_wrapper)
         self.zen_action = QAction("Zen Mode", self, checkable=True, shortcut="F11", triggered=self.toggle_zen_mode_wrapper, toolTip="Zen模式")
 
@@ -187,7 +196,7 @@ class MainWindow(QMainWindow):
         
         edit_menu = menu_bar.addMenu("编辑")
         # Add new actions to edit menu if desired, or they can remain context-menu only
-        edit_menu.addActions([self.undo_action, self.redo_action, self.cut_action, self.copy_action, self.paste_action, self.select_all_action, self.find_action, self.replace_action, self.translate_action, self.translate_selection_action, self.calculate_selection_action, self.copy_to_ai_action])
+        edit_menu.addActions([self.undo_action, self.redo_action, self.cut_action, self.copy_action, self.paste_action, self.select_all_action, self.find_action, self.replace_action, self.translate_action, self.translate_selection_action, self.calculate_selection_action, self.copy_to_ai_action, self.fetch_url_source_action])
 
         format_menu = menu_bar.addMenu("格式")
         format_menu.addActions([self.font_action, self.color_action, self.insert_image_action, self.toggle_theme_action, self.pdf_to_html_action])
@@ -483,14 +492,59 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "错误", "AI助手组件不可用或输入框未找到。")
         else:
-            if hasattr(self, 'statusBar'):
-                self.statusBar().showMessage("请先选择文本后再复制到AI助手", 3000)
+            if hasattr(self, 'statusBar') and self.statusBar: 
+                self.statusBar.showMessage("请先选择文本后再复制到AI助手", 3000)
                 
     def export_file_wrapper(self):
         if hasattr(self.file_operations, 'export_file'):
             self.file_operations.export_file()
         else:
             QMessageBox.warning(self, "错误", "导出功能尚未实现。")
+
+    def fetch_url_source_wrapper(self):
+        selected_text = ""
+        editor_widget = self.get_current_editor_widget()
+        if editor_widget:
+            if isinstance(editor_widget, QWebEngineView):
+                selected_text = editor_widget.selectedText().strip()
+            elif hasattr(editor_widget, 'textCursor'):
+                cursor = editor_widget.textCursor()
+                if cursor.hasSelection():
+                    selected_text = cursor.selectedText().strip()
+        
+        if selected_text:
+            q_url = QUrl(selected_text)
+            if q_url.isValid() and q_url.scheme() and q_url.host():
+                if hasattr(self, 'statusBar') and self.statusBar:
+                    self.statusBar.showMessage(f"正在抓取: {selected_text} ...", 0) 
+                self.network_service.fetch_html(selected_text)
+            else:
+                if hasattr(self, 'statusBar') and self.statusBar:
+                    self.statusBar.showMessage("选中的文本不是一个有效的URL。", 3000)
+        else:
+            if hasattr(self, 'statusBar') and self.statusBar:
+                self.statusBar.showMessage("请先选择一个URL。", 3000)
+
+    def _handle_html_fetched(self, url: str, html_content: str):
+        if hasattr(self, 'statusBar') and self.statusBar:
+            self.statusBar.showMessage(f"成功抓取: {url}", 5000)
+        
+        # Create a meaningful title for the new tab
+        parsed_url = QUrl(url)
+        tab_title = parsed_url.host() or os.path.basename(parsed_url.path()) or "抓取的源码"
+        if not tab_title: tab_title = "抓取的源码"
+
+
+        if hasattr(self.file_operations, 'open_html_content_in_new_tab'):
+            self.file_operations.open_html_content_in_new_tab(html_content, tab_title, base_url_for_resources=url)
+        else:
+            QMessageBox.warning(self, "错误", "无法在新标签页中打开抓取的源码。")
+
+    def _handle_fetch_error(self, url: str, error_message: str):
+        if hasattr(self, 'statusBar') and self.statusBar:
+            self.statusBar.showMessage(f"抓取失败: {url} - {error_message}", 5000)
+        QMessageBox.warning(self, "抓取源码失败", f"无法抓取以下URL的源码：\n{url}\n\n错误详情：\n{error_message}")
+
 
     def toggle_markdown_preview_panel_wrapper(self, checked):
         current_tab_container = self.tab_widget.currentWidget()
@@ -726,7 +780,7 @@ class MainWindow(QMainWindow):
             self.undo_action, self.redo_action, self.cut_action, self.copy_action,
             self.select_all_action, self.font_action, self.color_action,
             self.insert_image_action, self.find_action, self.replace_action,
-            self.translate_selection_action, self.calculate_selection_action, self.copy_to_ai_action # Add new actions
+            self.translate_selection_action, self.calculate_selection_action, self.copy_to_ai_action, self.fetch_url_source_action # Add new actions
         ]
         
         current_tab_container = self.tab_widget.currentWidget() if self.tab_widget else None
@@ -820,13 +874,29 @@ class MainWindow(QMainWindow):
         self.translate_selection_action.setEnabled(has_selection)
         self.calculate_selection_action.setEnabled(has_selection)
         self.copy_to_ai_action.setEnabled(has_selection)
+        
+        # Enable fetch_url_source_action if selection is a valid URL
+        is_valid_url_selected = False
+        if has_selection and current_widget:
+            selected_text_for_url_check = ""
+            if isinstance(current_widget, QWebEngineView):
+                selected_text_for_url_check = current_widget.selectedText().strip()
+            elif hasattr(current_widget, 'textCursor'):
+                selected_text_for_url_check = current_widget.textCursor().selectedText().strip()
+            
+            if selected_text_for_url_check:
+                q_url_check = QUrl(selected_text_for_url_check)
+                if q_url_check.isValid() and q_url_check.scheme() and q_url_check.host():
+                    is_valid_url_selected = True
+        self.fetch_url_source_action.setEnabled(is_valid_url_selected)
+
 
         # View toggles
         self.toggle_markdown_preview_action.setEnabled(is_markdown_tab)
         if is_markdown_tab:
             self.toggle_markdown_preview_action.setChecked(current_tab_container.is_preview_mode)
         
-        self.toggle_html_view_action.setEnabled(is_html_view_container_tab)
+        self.toggle_html_view_action.setEnabled(is_html_view_container) # Corrected variable name
         # If WangEditor has its own toggle, handle it here (assuming it's not the primary HTML editor now)
         # self.toggle_html_preview_action.setEnabled(is_wang_editor_tab) 
         # if is_wang_editor_tab: 
@@ -834,7 +904,7 @@ class MainWindow(QMainWindow):
         #     self.toggle_html_preview_action.setChecked(is_source_mode_wang)
         
         # Ensure HTML specific toggles are disabled if not an HTML container
-        if not is_html_view_container_tab:
+        if not is_html_view_container: # Corrected variable name
             self.toggle_html_view_action.setEnabled(False)
     
     def handle_html_container_modification(self, modified: bool):

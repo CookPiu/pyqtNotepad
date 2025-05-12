@@ -6,7 +6,8 @@ import shutil # For cleaning up resource directories
 
 # Corrected relative imports
 from ..atomic.editor.text_editor import TextEditor
-from ..atomic.editor.wang_editor import WangEditor
+# from ..atomic.editor.wang_editor import WangEditor # Comment out or remove this old import
+from wangEditor.wang_editor import WangEditor # Import from the project's wangEditor directory
 from ..atomic.markdown_editor_widget import MarkdownEditorWidget
 from ..views.pdf_viewer_view import PdfViewerView
 from ..views.office_viewer_view import OfficeViewerWidget
@@ -42,7 +43,7 @@ class FileOperations:
             editor_container.clear_content()
             tab_name_suffix = ".md"
         else: # Default to text, now uses WangEditor as per user request
-            editor_container = WangEditor() 
+            editor_container = WangEditor(parent=self.main_window, main_window_ref=self.main_window) 
             editor_container.setHtml("") # Start with empty content, WangEditor will handle it
             tab_name_suffix = ".txt" # Keep .txt suffix
 
@@ -216,19 +217,18 @@ class FileOperations:
                 except UnicodeDecodeError:
                     with open(abs_file_path, 'r', encoding='gbk') as f: content = f.read() 
                 
-                editor_to_add = WangEditor()
-                editor_to_add.setHtml(content) 
-                if hasattr(editor_to_add, '_bridge') and hasattr(editor_to_add._bridge, 'contentChangedSignal'):
-                     editor_to_add._bridge.contentChangedSignal.connect(
-                         lambda _html_payload, editor=editor_to_add: self.main_window.on_editor_content_changed(editor)
-                     )
-                elif hasattr(editor_to_add, 'document_modified'): 
-                    editor_to_add.document_modified.connect(
-                        lambda _modified_status, editor=editor_to_add: self.main_window.on_editor_content_changed(editor) 
-                    )
+                editor_to_add = WangEditor(parent=self.main_window, main_window_ref=self.main_window)
+                editor_to_add.setHtml(content)
+                # The new WangEditor (directly QWebEngineView) uses a PyQtBridge named 'pyqtBridge'
+                # and its contentChanged signal is connected to PyQtBridge.contentChanged.
+                # We need to connect to the bridge's signal if we want to react to content changes from JS.
+                # However, the current WangEditor's PyQtBridge.contentChanged is a pass-through.
+                # For simplicity and consistency, we'll rely on the QTimer.singleShot to set initial modified state.
+                # If live updates from WangEditor to Python are needed for 'isModified',
+                # the PyQtBridge.contentChanged would need to emit a signal that WangEditor (Python side) connects to.
                 QTimer.singleShot(0, lambda ed=editor_to_add: self.main_window.on_editor_content_changed(ed, initially_modified=False))
 
-            if editor_to_add:
+            if editor_to_add: # This block should be at the same indent level as the 'elif ext.lower() in ...'
                 editor_to_add.setProperty("file_path", abs_file_path)
                 editor_to_add.setProperty("is_new", False)
                 if workspace_path: editor_to_add.setProperty("workspace_path", workspace_path)
@@ -500,7 +500,7 @@ class FileOperations:
                 editor_container_to_add.set_content(content)
                 actual_editor_part_to_focus = editor_container_to_add.editor
             else: # text
-                editor_container_to_add = WangEditor()
+                editor_container_to_add = WangEditor(parent=self.main_window, main_window_ref=self.main_window)
                 editor_container_to_add.setHtml(content)
                 actual_editor_part_to_focus = editor_container_to_add
 
@@ -534,6 +534,60 @@ class FileOperations:
                 target_tab_w_resolved.removeTab(target_tab_w_resolved.indexOf(editor_container_to_add))
                 editor_container_to_add.deleteLater()
             return None
+
+    def open_html_content_in_new_tab(self, html_content: str, tab_title: str, base_url_for_resources: str = None):
+        """
+        Opens the given HTML content in a new tab using HtmlViewContainer, displayed in preview mode.
+        """
+        try:
+            # Create HtmlViewContainer, explicitly tell it this is not a disk file initially
+            # and pass the main_window_ref.
+            # It will default to preview mode if is_new_file is False and content is provided.
+            editor_container = HtmlViewContainer(
+                parent=self.main_window,
+                initial_content=html_content,
+                is_new_file=True, # Treat as new initially, path will be None
+                main_window_ref=self.main_window
+            )
+            editor_container.setProperty("untitled_name", tab_title) # Set tab title
+            editor_container.setProperty("file_path", None) # No actual file path
+            editor_container.setProperty("is_source_of_fetched_url", True) # Custom property
+            if base_url_for_resources:
+                editor_container.setProperty("base_url_for_resources", base_url_for_resources)
+            
+            # Switch to preview mode immediately if it's not the default for new with content
+            # The current HtmlViewContainer logic should handle this: if initial_content is given and is_new_file=True,
+            # it loads into text_editor_widget. We want it in preview.
+            # So, we might need to call switch_view after adding.
+
+            active_editor_group = self.ui_manager.get_active_editor_group()
+            target_tab_widget = active_editor_group.get_tab_widget() if active_editor_group else self.main_window.tab_widget
+            
+            if target_tab_widget is None:
+                QMessageBox.critical(self.main_window, "错误", "无法获取目标标签页控件。")
+                editor_container.deleteLater()
+                return
+
+            index = target_tab_widget.addTab(editor_container, tab_title)
+            target_tab_widget.setCurrentIndex(index)
+            
+            # Ensure it's in preview mode
+            if editor_container._current_mode == "source":
+                editor_container.switch_view() # Switch to preview
+            
+            # Since content is set directly, mark as not modified initially
+            editor_container.set_modified_status_on_current_editor(False)
+
+            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                self.main_window.statusBar.showMessage(f"已打开抓取的源码: {tab_title}", 5000)
+            
+            self.main_window.update_edit_actions_state(editor_container.get_current_actual_editor())
+
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "打开源码错误", f"在新标签页中打开抓取的源码时发生错误:\n{str(e)}")
+            if 'editor_container' in locals() and editor_container:
+                editor_container.deleteLater()
+
 
     def export_file(self):
         active_editor_group = self.ui_manager.get_active_editor_group()

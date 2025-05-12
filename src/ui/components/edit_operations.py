@@ -359,23 +359,18 @@ class EditOperations:
         editor = self.main_window.get_current_editor_widget()
         selected_text = ""
         
-        # 检查编辑器中是否有选中文本
-        if editor and hasattr(editor, 'textCursor'):
-            cursor = editor.textCursor()
-            if cursor.hasSelection():
-                selected_text = cursor.selectedText()
+        if editor:
+            if isinstance(editor, QWebEngineView): # Check if it's a QWebEngineView based editor
+                selected_text = editor.selectedText().strip()
+            elif hasattr(editor, 'textCursor'): # For QTextEdit based editors
+                cursor = editor.textCursor()
+                if cursor.hasSelection():
+                    selected_text = cursor.selectedText().strip()
         
-        # 如果没有选中文本，检查剪贴板是否有文本（用于HtmlEditor）
-        if not selected_text:
-            clipboard = QApplication.clipboard()
-            mime_data = clipboard.mimeData()
-            if mime_data.hasText():
-                selected_text = mime_data.text()
-                
         # 如果仍然没有文本可供翻译，显示错误消息
         if not selected_text or not selected_text.strip():
-            if hasattr(self.main_window, 'statusBar'):
-                self.main_window.statusBar().showMessage("请先选择要翻译的文本。", 3000)
+            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                self.main_window.statusBar.showMessage("请先选择要翻译的文本。", 3000)
             return
             
         # 打开翻译窗口并设置文本
@@ -386,8 +381,8 @@ class EditOperations:
         """计算当前编辑器中选中的数学表达式，并用结果替换选区。"""
         editor_widget = self.main_window.get_current_editor_widget()
         if not editor_widget:
-            if hasattr(self.main_window, 'statusBar'):
-                self.main_window.statusBar().showMessage("没有活动的编辑器。", 3000)
+            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                self.main_window.statusBar.showMessage("没有活动的编辑器。", 3000)
             return
 
         selected_text = ""
@@ -402,8 +397,8 @@ class EditOperations:
                 selected_text = cursor.selectedText().strip()
         
         if not selected_text:
-            if hasattr(self.main_window, 'statusBar'):
-                self.main_window.statusBar().showMessage("请选择要计算的表达式。", 3000)
+            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                self.main_window.statusBar.showMessage("请选择要计算的表达式。", 3000)
             return
 
         try:
@@ -420,20 +415,16 @@ class EditOperations:
             final_text_to_insert = f"{selected_text} = {result_str}"
 
             if is_web_editor:
-                escaped_insert_text = final_text_to_insert.replace("'", "\\'").replace("\n", "\\n")
-                js_code = f"""
-                    var sel = window.getSelection();
-                    if (sel.rangeCount > 0) {{
-                        var range = sel.getRangeAt(0);
-                        range.deleteContents();
-                        range.insertNode(document.createTextNode('{escaped_insert_text}'));
-                        // Attempt to trigger an input event for frameworks or contentEditable listeners
-                        var event = new Event('input', {{ bubbles: true, cancelable: true }});
-                        range.commonAncestorContainer.dispatchEvent(event);
-                    }}
-                """
+                # 使用 json.dumps 来更安全地转义文本以注入到 JavaScript 字符串中
+                import json
+                js_escaped_insert_text = json.dumps(final_text_to_insert)
+                
+                # 调用新的JS函数 window.replaceSelectionWithText
+                js_code = f"if (window.replaceSelectionWithText) {{ window.replaceSelectionWithText({js_escaped_insert_text}); }} else {{ console.error('JS function replaceSelectionWithText not found.'); }}"
+                
                 editor_widget.page().runJavaScript(js_code)
                 # For web editors, explicitly mark parent container as modified if possible
+                # 这个标记逻辑可能需要调整，因为JS端的onChange现在会负责通过pyqtBridge通知Python
                 current_tab_container = self.main_window.tab_widget.currentWidget()
                 if hasattr(current_tab_container, 'internalModificationChanged'):
                     current_tab_container.internalModificationChanged.emit(True)
@@ -456,10 +447,10 @@ class EditOperations:
             # For HtmlViewContainer, the internalModificationChanged signal should handle tab title.
             # For WangEditor, its own setModified should trigger necessary updates.
 
-            if hasattr(self.main_window, 'statusBar'):
-                self.main_window.statusBar().showMessage(f"计算结果: {final_text_to_insert}", 3000)
+            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                self.main_window.statusBar.showMessage(f"计算结果: {final_text_to_insert}", 3000)
 
         except Exception as e:
-            if hasattr(self.main_window, 'statusBar'):
-                self.main_window.statusBar().showMessage(f"计算错误: {e}", 3000)
+            if hasattr(self.main_window, 'statusBar') and self.main_window.statusBar:
+                self.main_window.statusBar.showMessage(f"计算错误: {e}", 3000)
             print(f"Error evaluating expression '{selected_text}': {e}")
