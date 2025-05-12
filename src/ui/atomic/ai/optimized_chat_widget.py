@@ -263,7 +263,10 @@ class OptimizedMessageWidget(QFrame):
             # doc.adjustSize() # This might not be needed if setTextWidth correctly triggers relayout for size
             content_height = int(doc.size().height())
             # Add a slightly larger buffer to be safe, especially if font metrics vary.
-            self.text_edit.setFixedHeight(content_height + 25) 
+            if self.is_user:
+                self.text_edit.setFixedHeight(content_height + 25)
+            else:
+                self.text_edit.setFixedHeight(content_height + 10) 
         elif current_content_widget is self.web_view:
             current_content_widget.setMinimumHeight(30)
             self._request_webview_height_update()
