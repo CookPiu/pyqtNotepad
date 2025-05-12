@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
     QListWidget, QListWidgetItem, QCheckBox, QApplication, QMessageBox,
     QDialog, QLabel, QDateEdit, QComboBox, QFormLayout, QDialogButtonBox,
-    QFrame, QSplitter, QMenu, QSizePolicy
+    QFrame, QSplitter, QMenu, QSizePolicy, QButtonGroup
 )
 from PyQt6.QtGui import QIcon, QAction, QColor, QFont, QBrush, QPalette
 from PyQt6.QtCore import Qt, QSize, QDate, pyqtSignal, QSignalBlocker
@@ -274,18 +274,33 @@ class TodoItemDialog(QDialog):
         form_layout = QFormLayout()
         form_layout.setSpacing(10)
 
-        self.title_edit = QLineEdit(self.todo_item.title if self.todo_item else "")
+        # 安全地获取初始值，避免空指针异常
+        initial_title = "" if self.todo_item is None else self.todo_item.title
+        initial_desc = "" if self.todo_item is None else self.todo_item.description
+        initial_completed = False if self.todo_item is None else self.todo_item.completed
+
+        self.title_edit = QLineEdit(initial_title)
         form_layout.addRow("标题*:", self.title_edit)
 
-        self.desc_edit = QLineEdit(self.todo_item.description if self.todo_item else "")
+        self.desc_edit = QLineEdit(initial_desc)
         form_layout.addRow("描述:", self.desc_edit)
 
         self.date_edit = QDateEdit(calendarPopup=True)
         self.date_edit.setDisplayFormat("yyyy-MM-dd")
-        if self.todo_item and self.todo_item.due_date:
-            date = QDate.fromString(self.todo_item.due_date, "yyyy-MM-dd")
-            self.date_edit.setDate(date if date.isValid() else QDate.currentDate())
-        else:
+        
+        # 安全地设置日期
+        try:
+            if self.todo_item and hasattr(self.todo_item, 'due_date') and self.todo_item.due_date:
+                date = QDate.fromString(self.todo_item.due_date, "yyyy-MM-dd")
+                if date.isValid():
+                    self.date_edit.setDate(date)
+                else:
+                    print(f"无效的日期格式: {self.todo_item.due_date}，使用当前日期")
+                    self.date_edit.setDate(QDate.currentDate())
+            else:
+                self.date_edit.setDate(QDate.currentDate())
+        except Exception as e:
+            print(f"设置日期时出错: {e}，使用当前日期")
             self.date_edit.setDate(QDate.currentDate())
         form_layout.addRow("截止日期:", self.date_edit)
 
@@ -294,22 +309,41 @@ class TodoItemDialog(QDialog):
         self.priority_group = QButtonGroup(self)
         priorities = ["低", "中", "高"]
         self.priority_buttons = {}
-        for prio in priorities:
+        
+        # 获取当前优先级，如果是新建则默认为"中"
+        current_priority = "中"
+        if self.todo_item is not None:
+            try:
+                # 确保todo_item是TodoItem类型
+                if isinstance(self.todo_item, TodoItem) and hasattr(self.todo_item, 'priority'):
+                    # 使用getter方法获取优先级，确保使用了property的验证逻辑
+                    current_priority = self.todo_item.get_priority()
+                    # 再次确保优先级是有效值
+                    if current_priority not in ["低", "中", "高"]:
+                        current_priority = "中"
+                        print(f"无效的优先级值: {current_priority}，使用默认值'中'")
+                else:
+                    print(f"todo_item不是有效的TodoItem对象或没有priority属性，使用默认值'中'")
+            except Exception as e:
+                print(f"获取优先级时出错: {e}，使用默认值'中'")
+        
+        # 为每个优先级创建单选按钮并添加到按钮组
+        for i, prio in enumerate(priorities):
             btn = QPushButton(prio)
             btn.setCheckable(True)
+            btn.setAutoExclusive(True)  # 确保按钮互斥，类似RadioButton
             btn.setObjectName(f"PrioBtn{prio}")
-            self.priority_group.addButton(btn)
+            # 使用ID添加按钮到按钮组
+            self.priority_group.addButton(btn, i)
             priority_layout.addWidget(btn)
             self.priority_buttons[prio] = btn
-            if self.todo_item and self.todo_item.priority == prio:
-                btn.setChecked(True)
-            elif not self.todo_item and prio == "中": # Default for new
+            # 安全地设置选中状态
+            if prio == current_priority:
                 btn.setChecked(True)
         form_layout.addRow("优先级:", priority_layout)
 
         self.completed_checkbox = QCheckBox("已完成")
-        if self.todo_item:
-            self.completed_checkbox.setChecked(self.todo_item.completed)
+        self.completed_checkbox.setChecked(initial_completed)
         form_layout.addRow("", self.completed_checkbox)
 
         layout.addLayout(form_layout)
@@ -345,22 +379,72 @@ class TodoItemDialog(QDialog):
 
     def get_selected_priority(self) -> str:
         """Gets the selected priority from the button group."""
-        checked_button = self.priority_group.checkedButton()
-        return checked_button.text() if checked_button else "中"
+        try:
+            checked_button = self.priority_group.checkedButton()
+            if checked_button:
+                return checked_button.text()
+            else:
+                print("没有选中的优先级按钮，使用默认值'中'")
+                return "中"
+        except Exception as e:
+            print(f"获取选中的优先级按钮时出错: {e}，使用默认值'中'")
+            return "中"
 
     def get_todo_data(self) -> dict:
-        """Returns the edited/new todo data as a dictionary."""
+        """返回编辑/新建的待办事项数据，确保数据安全性"""
+        # 标题处理（必填字段）
         title = self.title_edit.text().strip()
-        if not title: title = "未命名待办事项"
+        if not title: 
+            title = "未命名待办事项"
+        
+        # 安全地获取ID和创建时间
+        item_id = str(uuid.uuid4())  # 默认为新ID
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # 默认为当前时间
+        
+        # 如果是编辑现有项目，则保留原ID和创建时间
+        if self.todo_item is not None:
+            try:
+                item_id = self.todo_item.id
+                if hasattr(self.todo_item, 'created_at') and self.todo_item.created_at:
+                    created_at = self.todo_item.created_at
+            except Exception as e:
+                print(f"获取待办事项原始数据时出错: {e}")
+                # 出错时使用默认值，确保不会崩溃
+        
+        # 安全地获取日期
+        try:
+            due_date = self.date_edit.date().toString("yyyy-MM-dd")
+        except Exception as e:
+            print(f"获取日期时出错: {e}，使用当前日期")
+            due_date = QDate.currentDate().toString("yyyy-MM-dd")
+            
+        # 安全地获取优先级
+        try:
+            priority = self.get_selected_priority()
+            # 确保优先级是有效值
+            if priority not in ["低", "中", "高"]:
+                print(f"无效的优先级值: {priority}，使用默认值'中'")
+                priority = "中"
+        except Exception as e:
+            print(f"获取优先级时出错: {e}，使用默认值'中'")
+            priority = "中"  # 默认中优先级
+            
+        # 安全地获取完成状态
+        try:
+            completed = self.completed_checkbox.isChecked()
+        except Exception as e:
+            print(f"获取完成状态时出错: {e}，使用默认值'未完成'")
+            completed = False
+            
+        # 构建并返回数据字典
         return {
-            "id": self.todo_item.id if self.todo_item else str(uuid.uuid4()),
+            "id": item_id,
             "title": title,
             "description": self.desc_edit.text().strip(),
-            "due_date": self.date_edit.date().toString("yyyy-MM-dd"),
-            "priority": self.get_selected_priority(),
-            "completed": self.completed_checkbox.isChecked(),
-            # Preserve created_at if editing
-            "created_at": self.todo_item.created_at if self.todo_item else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "due_date": due_date,
+            "priority": priority,
+            "completed": completed,
+            "created_at": created_at
         }
 
 # --- Main Todo List View ---
@@ -466,97 +550,307 @@ class TodoListView(BaseWidget):
 
     # --- UI Refresh ---
     def refresh_display_list(self):
-        """Filters, sorts, and displays todo items in the list widget."""
-        status_filter = self.filter_combo.currentText()
-        priority_filter = self.priority_filter_combo.currentText()
+        """过滤、排序并显示待办事项列表，包含错误处理机制"""
+        try:
+            # 获取过滤条件
+            try:
+                status_filter = self.filter_combo.currentText()
+                priority_filter = self.priority_filter_combo.currentText()
+            except Exception as e:
+                print(f"获取过滤条件时出错: {e}")
+                status_filter = "全部"
+                priority_filter = "全部"
 
-        # 使用数据管理器过滤和排序数据
-        filtered_data = self.data_manager.filter_items(status_filter, priority_filter)
-        sorted_data = self.data_manager.sort_items(filtered_data)
-
-        # Display
-        self.todo_list_widget.clear()
-        if not sorted_data:
-            item = QListWidgetItem("无待办事项")
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable) # Make it non-selectable
-            self.todo_list_widget.addItem(item)
-        else:
-            for item_data in sorted_data:
+            # 使用数据管理器过滤和排序数据
+            try:
+                filtered_data = self.data_manager.filter_items(status_filter, priority_filter)
+                sorted_data = self.data_manager.sort_items(filtered_data)
+            except Exception as e:
+                print(f"过滤和排序数据时出错: {e}")
+                # 出错时尝试获取所有数据
                 try:
-                    todo_item = TodoItem.from_dict(item_data) # Create object for widget
-                    widget = TodoItemWidget(todo_item)
-                    widget.completed_changed.connect(self._handle_item_status_change)
-                    widget.edited.connect(self._handle_item_edit)
-                    widget.deleted.connect(self._handle_item_delete)
+                    sorted_data = self.data_manager.get_data()
+                except:
+                    sorted_data = []
 
-                    list_item = QListWidgetItem()
-                    list_item.setSizeHint(widget.sizeHint()) # Use widget's preferred size
-                    # Store ID in item data for easy retrieval
-                    list_item.setData(Qt.ItemDataRole.UserRole, todo_item.id)
+            # 清空列表并显示数据
+            try:
+                self.todo_list_widget.clear()
+                
+                # 无数据时显示提示
+                if not sorted_data:
+                    item = QListWidgetItem("无待办事项")
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable) # 设为不可选
+                    self.todo_list_widget.addItem(item)
+                else:
+                    # 添加每个待办事项
+                    for item_data in sorted_data:
+                        try:
+                            # 创建待办事项对象和小部件
+                            todo_item = TodoItem.from_dict(item_data) # 为小部件创建对象
+                            widget = TodoItemWidget(todo_item)
+                            
+                            # 连接信号
+                            widget.completed_changed.connect(self._handle_item_status_change)
+                            widget.edited.connect(self._handle_item_edit)
+                            widget.deleted.connect(self._handle_item_delete)
 
-                    self.todo_list_widget.addItem(list_item)
-                    self.todo_list_widget.setItemWidget(list_item, widget)
-                    # Apply theme styles after adding
-                    widget._apply_item_styles(is_dark=False) # TODO: Get actual theme state
-                except Exception as e:
-                    print(f"Error creating widget for item {item_data.get('id')}: {e}")
-                    error_item = QListWidgetItem(f"加载错误: {item_data.get('title', '未知')}")
+                            # 创建列表项
+                            list_item = QListWidgetItem()
+                            list_item.setSizeHint(widget.sizeHint()) # 使用小部件的首选大小
+                            # 在项目数据中存储ID以便于检索
+                            list_item.setData(Qt.ItemDataRole.UserRole, todo_item.id)
+
+                            # 添加到列表
+                            self.todo_list_widget.addItem(list_item)
+                            self.todo_list_widget.setItemWidget(list_item, widget)
+                            
+                            # 添加后应用主题样式
+                            try:
+                                widget._apply_item_styles(is_dark=False) # TODO: 获取实际主题状态
+                            except Exception as style_error:
+                                print(f"应用样式时出错: {style_error}")
+                        except Exception as item_error:
+                            print(f"创建待办事项小部件时出错 {item_data.get('id')}: {item_error}")
+                            # 显示错误项
+                            try:
+                                error_item = QListWidgetItem(f"加载错误: {item_data.get('title', '未知')}")
+                                error_item.setForeground(QColor("red"))
+                                self.todo_list_widget.addItem(error_item)
+                            except:
+                                # 如果连错误项都无法创建，至少添加一个通用错误项
+                                self.todo_list_widget.addItem("加载项目时出错")
+            except Exception as ui_error:
+                print(f"更新UI时出错: {ui_error}")
+                # 尝试显示错误消息
+                try:
+                    self.todo_list_widget.clear()
+                    error_item = QListWidgetItem("刷新列表时出错，请重试")
                     error_item.setForeground(QColor("red"))
                     self.todo_list_widget.addItem(error_item)
+                except:
+                    pass # 无法恢复的UI错误
+        except Exception as e:
+            print(f"刷新待办事项列表时发生严重错误: {e}")
+            # 这里不再尝试恢复UI，因为可能会导致更多错误
 
     # --- Item Actions ---
     def add_new_item_dialog(self):
-        """Opens the dialog to add a new item."""
-        dialog = TodoItemDialog(parent=self)
-        # dialog._apply_dialog_styles(is_dark=...) # Apply theme
-        if dialog.exec():
-            new_data = dialog.get_todo_data()
-            self.data_manager.add_item(new_data)
-            self.refresh_display_list()
+        """打开对话框添加新的待办事项，包含错误处理机制"""
+        try:
+            dialog = TodoItemDialog(parent=self)
+            # 应用当前主题
+            # dialog._apply_dialog_styles(is_dark=self.is_dark_mode) # 如果有主题管理
+            
+            if dialog.exec():
+                try:
+                    # 安全地获取数据
+                    new_data = dialog.get_todo_data()
+                    
+                    # 验证必要字段
+                    if not new_data.get("title"):
+                        new_data["title"] = "未命名待办事项"
+                    
+                    # 添加到数据管理器
+                    success = self.data_manager.add_item(new_data)
+                    
+                    if success:
+                        self.refresh_display_list()
+                    else:
+                        QMessageBox.warning(self, "添加失败", "无法保存新的待办事项，请稍后再试。")
+                        
+                except Exception as e:
+                    print(f"处理新待办事项数据时出错: {e}")
+                    QMessageBox.critical(self, "错误", f"创建待办事项时发生错误: {str(e)}")
+        except Exception as e:
+            print(f"创建待办事项对话框时出错: {e}")
+            QMessageBox.critical(self, "错误", "无法创建新待办事项对话框。")
 
     def quick_add_item(self):
-        """Adds a new item from the quick add line edit."""
-        title = self.quick_add_edit.text().strip()
-        if not title: return
-        new_item = TodoItem(title=title) # Create object with default values
-        self.data_manager.add_item(new_item.to_dict()) # 使用数据管理器添加
-        self.refresh_display_list()
-        self.quick_add_edit.clear()
+        """从快速添加输入框添加新待办事项，包含错误处理机制"""
+        try:
+            # 获取并验证标题
+            title = self.quick_add_edit.text().strip()
+            if not title: 
+                return
+                
+            try:
+                # 创建新的待办事项对象
+                new_item = TodoItem(title=title) # 使用默认值创建对象
+                
+                # 添加到数据管理器
+                success = self.data_manager.add_item(new_item.to_dict())
+                
+                if success:
+                    self.refresh_display_list()
+                    self.quick_add_edit.clear()
+                else:
+                    QMessageBox.warning(self, "添加失败", "无法保存新的待办事项，请稍后再试。")
+            except Exception as e:
+                print(f"快速添加待办事项时出错: {e}")
+                QMessageBox.warning(self, "添加失败", "创建待办事项时发生错误，请尝试使用完整表单添加。")
+        except Exception as e:
+            print(f"处理快速添加输入时出错: {e}")
+            # 清空输入框，避免用户反复尝试导致同样的错误
+            self.quick_add_edit.clear()
 
     def _handle_item_status_change(self, item_id: str, completed: bool):
-        """Updates the completion status in the data list and saves."""
-        item_data = self.data_manager.get_item_by_id(item_id)
-        if item_data:
-            item_data["completed"] = completed
-            self.data_manager.update_item(item_id, item_data)
-            
-            # Find the widget in the list and update its style immediately
-            list_item = self._find_list_item_by_id(item_id)
-            if list_item:
-                widget = self.todo_list_widget.itemWidget(list_item)
-                if isinstance(widget, TodoItemWidget):
-                    widget._update_dynamic_content() # Update styles based on new status
-            # Optionally re-filter/re-sort if status change affects visibility/order
-            # self.refresh_display_list() # Can be slow if list is long
+        """更新待办事项的完成状态并保存，包含错误处理机制"""
+        try:
+            # 获取待办事项数据
+            item_data = self.data_manager.get_item_by_id(item_id)
+            if not item_data:
+                print(f"找不到ID为{item_id}的待办事项")
+                return
+                
+            try:
+                # 更新完成状态
+                item_data["completed"] = completed
+                success = self.data_manager.update_item(item_id, item_data)
+                
+                if success:
+                    # 找到列表中的小部件并立即更新其样式
+                    try:
+                        list_item = self._find_list_item_by_id(item_id)
+                        if list_item:
+                            widget = self.todo_list_widget.itemWidget(list_item)
+                            if isinstance(widget, TodoItemWidget):
+                                widget._update_dynamic_content() # 根据新状态更新样式
+                    except Exception as e:
+                        print(f"更新待办事项UI时出错: {e}")
+                        # 如果UI更新失败，刷新整个列表
+                        self.refresh_display_list()
+                else:
+                    print(f"更新ID为{item_id}的待办事项状态失败")
+                    # 如果状态更新失败，刷新整个列表以恢复正确状态
+                    self.refresh_display_list()
+            except Exception as e:
+                print(f"更新待办事项状态时出错: {e}")
+                # 出错时刷新列表以确保显示正确状态
+                self.refresh_display_list()
+        except Exception as e:
+            print(f"处理待办事项状态变更时出错: {e}")
+            # 严重错误时完全刷新列表
+            self.refresh_display_list()
 
     def _handle_item_edit(self, item_id: str):
-        """Opens the edit dialog for the specified item."""
-        item_data = self.data_manager.get_item_by_id(item_id)
-        if not item_data: return
-        todo_item_obj = TodoItem.from_dict(item_data) # Create object for dialog
-
-        dialog = TodoItemDialog(todo_item=todo_item_obj, parent=self)
-        # dialog._apply_dialog_styles(is_dark=...) # Apply theme
-        if dialog.exec():
-            updated_data = dialog.get_todo_data()
-            self.data_manager.update_item(item_id, updated_data)
-            self.refresh_display_list() # Refresh the whole list
+        """打开编辑对话框编辑指定的待办事项，包含错误处理机制"""
+        try:
+            # 获取待办事项数据
+            print(f"正在获取ID为{item_id}的待办事项数据...")
+            item_data = self.data_manager.get_item_by_id(item_id)
+            if not item_data: 
+                print(f"找不到ID为{item_id}的待办事项")
+                QMessageBox.warning(self, "编辑失败", f"找不到ID为{item_id}的待办事项")
+                return
+            print(f"成功获取待办事项数据: {item_data}")
+                
+            try:
+                # 创建待办事项对象
+                print("正在创建TodoItem对象...")
+                todo_item_obj = TodoItem.from_dict(item_data) # 为对话框创建对象
+                print(f"TodoItem对象创建结果: {todo_item_obj}")
+                
+                # 确保待办事项对象是有效的
+                if not isinstance(todo_item_obj, TodoItem):
+                    print(f"创建的待办事项对象无效: {todo_item_obj}")
+                    QMessageBox.warning(self, "编辑失败", "无法创建有效的待办事项对象")
+                    return
+                    
+                # 确保待办事项对象包含所有必要的属性
+                print(f"检查待办事项属性 - 优先级: {todo_item_obj.priority if hasattr(todo_item_obj, 'priority') else '未设置'}")
+                if not hasattr(todo_item_obj, 'priority') or todo_item_obj.priority not in ["低", "中", "高"]:
+                    print(f"设置默认优先级为'中'")
+                    todo_item_obj.set_priority(item_data.get("priority", "中"))
+                    
+                print(f"检查待办事项属性 - 截止日期: {todo_item_obj.due_date if hasattr(todo_item_obj, 'due_date') else '未设置'}")
+                if not hasattr(todo_item_obj, 'due_date'):
+                    print(f"设置默认截止日期")
+                    todo_item_obj.due_date = item_data.get("due_date")
+                    
+                # 创建并显示对话框
+                print("正在创建TodoItemDialog对话框...")
+                try:
+                    dialog = TodoItemDialog(todo_item=todo_item_obj, parent=self)
+                    print("TodoItemDialog对话框创建成功")
+                    # dialog._apply_dialog_styles(is_dark=self.is_dark_mode) # 如果有主题管理
+                    
+                    print("正在显示对话框...")
+                    result = dialog.exec()
+                    print(f"对话框结果: {result}")
+                    
+                    if result:
+                        try:
+                            # 安全地获取更新后的数据
+                            print("正在获取更新后的数据...")
+                            updated_data = dialog.get_todo_data()
+                            print(f"更新后的数据: {updated_data}")
+                            
+                            # 验证必要字段
+                            if not updated_data.get("title"):
+                                updated_data["title"] = "未命名待办事项"
+                            
+                            # 确保保留原始ID
+                            updated_data["id"] = item_id
+                            
+                            # 更新数据
+                            print("正在更新数据...")
+                            success = self.data_manager.update_item(item_id, updated_data)
+                            print(f"数据更新结果: {success}")
+                            
+                            if success:
+                                self.refresh_display_list() # 刷新整个列表
+                            else:
+                                QMessageBox.warning(self, "更新失败", "无法保存更新的待办事项，请稍后再试。")
+                        except Exception as e:
+                            print(f"处理编辑后的待办事项数据时出错: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            QMessageBox.critical(self, "错误", f"更新待办事项时发生错误: {str(e)}")
+                except Exception as dialog_error:
+                    print(f"创建或显示对话框时出错: {dialog_error}")
+                    import traceback
+                    traceback.print_exc()
+                    QMessageBox.critical(self, "错误", f"无法创建或显示编辑对话框: {str(dialog_error)}")
+            except Exception as e:
+                print(f"创建编辑对话框时出错: {e}")
+                import traceback
+                traceback.print_exc()
+                QMessageBox.critical(self, "错误", "无法创建编辑对话框。")
+        except Exception as e:
+            print(f"处理待办事项编辑请求时出错: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "错误", "处理编辑请求时发生错误。")
 
     def _handle_item_delete(self, item_id: str):
-        """Deletes the item with the specified ID."""
-        if self.data_manager.delete_item(item_id):
-            self.refresh_display_list()
+        """删除指定ID的待办事项，包含错误处理机制"""
+        try:
+            # 确认删除
+            confirm = QMessageBox.question(
+                self, 
+                "确认删除", 
+                "确定要删除这个待办事项吗？", 
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if confirm == QMessageBox.StandardButton.Yes:
+                try:
+                    # 执行删除操作
+                    success = self.data_manager.delete_item(item_id)
+                    
+                    if success:
+                        self.refresh_display_list()
+                    else:
+                        print(f"删除ID为{item_id}的待办事项失败")
+                        QMessageBox.warning(self, "删除失败", "无法删除该待办事项，请稍后再试。")
+                except Exception as e:
+                    print(f"删除待办事项时出错: {e}")
+                    QMessageBox.critical(self, "错误", f"删除待办事项时发生错误: {str(e)}")
+        except Exception as e:
+            print(f"处理删除请求时出错: {e}")
+            QMessageBox.critical(self, "错误", "处理删除请求时发生错误。")
 
     def _find_list_item_by_id(self, item_id: str) -> QListWidgetItem | None:
          """Finds the QListWidgetItem corresponding to a given data ID."""
