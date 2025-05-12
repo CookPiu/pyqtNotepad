@@ -131,84 +131,143 @@ class CalculatorWidget(BaseWidget):
         
         return panel
 
-    def update_styles(self):
+    def update_styles(self, is_dark: bool = False): # Add is_dark parameter
+        # Define colors based on theme
+        if is_dark:
+            bg_color = "#2E2E2E"
+            display_card_bg_color = "#2E2E2E"
+            main_display_text_color = "#E0E0E0"
+            history_display_text_color = "#AAAAAA"
+            button_border_color = "#454545"
+            digit_button_bg = "#3C3C3C"
+            digit_button_text = "#E0E0E0"
+            digit_button_hover_bg = "#4A4A4A"
+            op_button_bg = "#353535"
+            op_button_text = "#E0E0E0"
+            op_button_hover_bg = "#424242"
+            clear_button_bg = "#353535"
+            clear_button_text = "#E0E0E0"
+            clear_button_hover_bg = "#424242"
+            equal_button_bg = "#0A84FF" # Blue for equals
+            equal_button_text = "#FFFFFF"
+            equal_button_hover_bg = "#0070D9"
+            pressed_button_bg = "#505050"
+        else: # Light theme (original colors)
+            bg_color = "#F0E8F3"
+            display_card_bg_color = "#F0E8F3"
+            main_display_text_color = "#000000"
+            history_display_text_color = "#555555"
+            button_border_color = "#D0D0D0"
+            digit_button_bg = "#FFFFFF"
+            digit_button_text = "#000000"
+            digit_button_hover_bg = "#F0F0F0"
+            op_button_bg = "#F8F8F8"
+            op_button_text = "#333333"
+            op_button_hover_bg = "#E8E8E8"
+            clear_button_bg = "#F8F8F8"
+            clear_button_text = "#333333"
+            clear_button_hover_bg = "#E8E8E8"
+            equal_button_bg = "#333333"
+            equal_button_text = "#FFFFFF"
+            equal_button_hover_bg = "#454545"
+            pressed_button_bg = "#D0D0D0"
+
         # Overall widget style (background)
-        self.setStyleSheet("""
-            CalculatorWidget {
-                background-color: #F0E8F3; /* Pale lavender/pinkish background */
-            }
-            #displayCard {
-                background-color: #F0E8F3; /* Same as main background, or slightly lighter if needed */
-                border: none; /* No border for the card itself, display will have it */
+        self.setStyleSheet(f"""
+            CalculatorWidget {{
+                background-color: {bg_color};
+            }}
+            #displayCard {{
+                background-color: {display_card_bg_color};
+                border: none;
                 border-radius: 8px;
-            }
-            #mainDisplay {
-                background-color: #F0E8F3; /* Transparent or same as card */
-                border: none; /* No border for QLineEdit */
-                color: #000000;
+            }}
+            #mainDisplay {{
+                background-color: {display_card_bg_color}; 
+                border: none; 
+                color: {main_display_text_color};
                 font-family: 'Segoe UI';
-                font-size: 40px; /* Large font for main display */
+                font-size: 40px; 
                 font-weight: bold;
                 padding: 5px;
-            }
-            #historyDisplay {
-                background-color: #F0E8F3; /* Transparent or same as card */
-                color: #555555; /* Dark gray for history */
+            }}
+            #historyDisplay {{
+                background-color: {display_card_bg_color};
+                color: {history_display_text_color};
                 font-family: 'Segoe UI';
-                font-size: 14px; /* Smaller font for history */
+                font-size: 14px;
                 padding-right: 5px;
-            }
+            }}
         """)
 
-        button_base_style = """
+        button_base_style = f"""
             QPushButton {{
-                border: 1px solid #D0D0D0; /* Light gray border for separation */
+                border: 1px solid {button_border_color};
                 border-radius: 6px;
                 font-family: 'Segoe UI';
                 font-size: 15px;
                 min-height: 40px; 
             }}
             QPushButton:hover {{
-                border: 1px solid #B0B0B0;
+                border: 1px solid {self._adjust_border_color(button_border_color, is_dark)};
             }}
             QPushButton:pressed {{
-                background-color: #D0D0D0;
+                background-color: {pressed_button_bg};
             }}
         """
         
         for btn in self.findChildren(CalcButton):
             role = btn.property("role")
-            style = button_base_style
+            current_style = button_base_style # Start with base
             
+            specific_style = ""
             if role == "digit" or role == "func" or role == "clear":
-                if btn.text() == "CE" or btn.text() == "C" or btn.text() == "⌫":
-                     style += """
-                        QPushButton { background-color: #F8F8F8; color: #333333; }
-                        QPushButton:hover { background-color: #E8E8E8; }
-                     """
-                elif btn.text() == "¹/x" or btn.text() == "x²" or btn.text() == "²√x" or btn.text() == "%" or btn.text() == "+/-":
-                     style += """
-                        QPushButton { background-color: #F8F8F8; color: #333333; }
-                        QPushButton:hover { background-color: #E8E8E8; }
-                     """
+                if btn.text() in ["CE", "C", "⌫"] or btn.text() in ["¹/x", "x²", "²√x", "%", "+/-"]:
+                    specific_style = f"""
+                        QPushButton {{ background-color: {clear_button_bg}; color: {clear_button_text}; }}
+                        QPushButton:hover {{ background-color: {clear_button_hover_bg}; }}
+                    """
                 else: # Digits and dot
-                    style += """
-                        QPushButton { background-color: #FFFFFF; color: #000000; font-weight: 600; font-size: 16px;}
-                        QPushButton:hover { background-color: #F0F0F0; }
+                    specific_style = f"""
+                        QPushButton {{ background-color: {digit_button_bg}; color: {digit_button_text}; font-weight: 600; font-size: 16px;}}
+                        QPushButton:hover {{ background-color: {digit_button_hover_bg}; }}
                     """
             elif role == "op":
-                style += """
-                    QPushButton { background-color: #F8F8F8; color: #333333; font-size: 18px;}
-                    QPushButton:hover { background-color: #E8E8E8; }
+                specific_style = f"""
+                    QPushButton {{ background-color: {op_button_bg}; color: {op_button_text}; font-size: 18px;}}
+                    QPushButton:hover {{ background-color: {op_button_hover_bg}; }}
                 """
             elif role == "equal":
-                style += """
-                    QPushButton { background-color: #333333; color: #FFFFFF; font-size: 18px; font-weight: bold;}
-                    QPushButton:hover { background-color: #454545; }
-                    QPushButton:pressed { background-color: #252525; }
+                specific_style = f"""
+                    QPushButton {{ background-color: {equal_button_bg}; color: {equal_button_text}; font-size: 18px; font-weight: bold;}}
+                    QPushButton:hover {{ background-color: {equal_button_hover_bg}; }}
+                    QPushButton:pressed {{ background-color: {self._adjust_button_pressed_color(equal_button_bg, is_dark)}; }}
                 """
-            btn.setStyleSheet(style)
+            btn.setStyleSheet(current_style + specific_style)
 
+    def _adjust_border_color(self, color_hex, is_dark_theme, amount=20):
+        # Simple helper to darken/lighten border for hover
+        # This is a placeholder, a more robust QColor based adjustment would be better
+        if is_dark_theme: # lighten
+            return self._adjust_hex_color(color_hex, amount)
+        else: # darken
+            return self._adjust_hex_color(color_hex, -amount)
+
+    def _adjust_button_pressed_color(self, color_hex, is_dark_theme, amount=20):
+        if is_dark_theme: # darken further
+            return self._adjust_hex_color(color_hex, -amount)
+        else: # darken
+            return self._adjust_hex_color(color_hex, -amount) # Or use a fixed pressed_button_bg
+
+    def _adjust_hex_color(self, hex_str, change):
+        try:
+            hex_val = hex_str.lstrip('#')
+            lv = len(hex_val)
+            rgb = tuple(int(hex_val[i:i + lv // 3], 16) for i in range(0, lv, lv // 3))
+            new_rgb = tuple(max(0, min(255, val + change)) for val in rgb)
+            return f"#{''.join([f'{val:02x}' for val in new_rgb])}"
+        except:
+            return hex_str # fallback
 
     def reset_calculator(self):
         self.current_input = "0"

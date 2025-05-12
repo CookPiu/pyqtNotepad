@@ -13,15 +13,6 @@
     "2025-05-15": [
         {
             "date": "2025-05-15",
-            "description": "123",
-            "id": "20250512161133883693",
-            "reminder": false,
-            "time": "16:11",
-            "title": "123",
-            "type": "会议"
-        },
-        {
-            "date": "2025-05-15",
             "description": "",
             "id": "8ac6e62b-0446-43f5-a2b3-77edda3b4b54",
             "time": "15:59",
@@ -38,22 +29,6 @@
         }
     ],
     "2025-05-16": [
-        {
-            "date": "2025-05-16",
-            "description": "",
-            "id": "2629deb1-a039-4c01-b0f8-ce9f772ff7a0",
-            "time": "01:00",
-            "title": "Final Exam (D1) opens",
-            "type": "其他"
-        },
-        {
-            "date": "2025-05-16",
-            "description": "",
-            "id": "a34e2301-580b-4d7d-b7d3-47462add473e",
-            "time": "01:00",
-            "title": "Final Exam (D1) closes",
-            "type": "其他"
-        },
         {
             "date": "2025-05-16",
             "description": "",

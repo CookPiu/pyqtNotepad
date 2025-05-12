@@ -115,11 +115,15 @@ class CombinedTools(BaseWidget):
         """)
 
         # Propagate theme update to child widgets if they have update_styles method
-        if hasattr(self.calendar_tool, 'update_styles'):
+        if hasattr(self, 'calendar_tool') and hasattr(self.calendar_tool, 'update_styles'):
             self.calendar_tool.update_styles(is_dark)
-        if hasattr(self.notes_tool, 'update_styles'): # Check if the temp widget has it
+        if hasattr(self, 'notes_tool') and hasattr(self.notes_tool, 'update_styles'):
             self.notes_tool.update_styles(is_dark)
-        if hasattr(self.timer_tool, 'update_styles'):
+        if hasattr(self, 'timer_tool') and hasattr(self.timer_tool, 'update_styles'):
             self.timer_tool.update_styles(is_dark)
+        if hasattr(self, 'calculator_tool') and hasattr(self.calculator_tool, 'update_styles'): # Added check for calculator_tool
+            self.calculator_tool.update_styles(is_dark)
+        if hasattr(self, 'speech_tool') and hasattr(self.speech_tool, 'update_styles'): # Added check for speech_tool
+            self.speech_tool.update_styles(is_dark)
 
     # Add methods to access or control the child widgets if necessary

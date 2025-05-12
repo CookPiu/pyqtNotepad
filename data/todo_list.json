@@ -1,14 +1,5 @@
 [
   {
-    "id": "17e1d99c-1702-42bc-9336-bd5f161332e5",
-    "title": "1",
-    "description": "",
-    "due_date": "2025-05-12",
-    "priority": "高",
-    "completed": false,
-    "created_at": "2025-05-12 14:15:26"
-  },
-  {
     "id": "d6e5dd3e-12a5-4676-9f8f-6a5ea0afaec7",
     "title": "Assignment (Exercises of Chapter 1-10) is due",
     "description": "",
