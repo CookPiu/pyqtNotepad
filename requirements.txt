@@ -1,23 +1,47 @@
-# 合并自所有项目依赖
-# 主项目依赖
-PyQt6>=6.6.0
-PyQt6-WebEngine>=6.6.0
-PyMuPDF>=1.24.1
-markdown-it-py>=3.0
-markdownify>=0.11.6
-pywin32
-pyaudio
-baidu-aip
-chardet
-PyYAML
-beautifulsoup4
-lxml
+# PyQt6核心组件
+PyQt6>=6.0.0
+PyQt6-WebEngine>=6.0.0
 
-# note_downloader 依赖
-requests
-tqdm
-selenium
-webdriver-manager
-pypdf2
-python-pptx
-python-docx
+# PDF处理
+PyMuPDF>=1.20.0
+
+# 网络请求
+requests>=2.25.0
+
+# 语音识别
+pyaudio>=0.2.11
+baidu-aip>=4.16.0
+
+# 网页解析
+beautifulsoup4>=4.9.0
+lxml>=4.6.0
+
+# 文档处理
+python-docx>=0.8.11
+python-pptx>=0.6.21
+PyPDF2>=3.0.0
+
+# 自动化工具
+selenium>=4.0.0
+webdriver-manager>=3.8.0
+
+# 配置文件处理
+PyYAML>=6.0
+
+# 进度条
+tqdm>=4.62.0
+
+# AI相关
+openai>=1.0.0
+
+# Markdown渲染
+markdown>=3.4.0
+markdown-it-py>=3.0.0
+markdownify>=0.11.0
+python-markdown-extensions>=3.4.0
+
+# 图像处理
+Pillow>=8.3.0
+
+# 字符编码检测
+chardet>=4.0.0
